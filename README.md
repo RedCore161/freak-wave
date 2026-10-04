@@ -174,12 +174,12 @@ the timeline's fuzzy crest marks and buys the cheapest skills between attempts
 
 1. records when the player reaches each sea and what it owns,
 2. bisects each sea's hp multiplier so the **on-arrival** win chance hits a
-   target: 65% on sea 1, about 40% on sea 2, falling to about 15% by sea 12
+   target: 50% on sea 1, 30% on sea 2, falling to 10% by sea 12
    (most seas are not cleared on the first try),
-3. checks that the **two most helpful next upgrades** lift it to at least 55%,
+3. checks that the **two most helpful next upgrades** lift it to at least 45%,
    softening the sea if not,
 4. scales skill effect sizes if upgrades matter too little or too much, and
-   skill costs if the economy buys more or fewer than 1–2.5 skills per sea,
+   skill costs if the economy buys more or fewer than 0.6–1.3 skills per sea,
 5. halfway through, nudges each skill's cost toward its measured value.
 
 The report (`balance/report.html`, also served in balancing mode) shows chaos
@@ -194,6 +194,4 @@ walls and more hp than the verified solution delivers. A sea is cleared by
 ruining half of all its cities (`rules.passShare`), so bonus cities are
 optional extra chaos, or an alternative target.
 
-Crest marks on the timeline are **fuzzy**: each mark is offset by up to
-± `rules.arrivalPrecision` seconds (0.6 s by default), and a band shows the
-uncertainty. The **Seismograph I–III** skills shrink it.
+A fresh player gets **no crest marks** on the timeline and has to judge timing from the waves. **Seismograph I–III** (Timing branch) add marks under each city showing when each quake's crest arrives, accurate to ±0.6 s, ±0.3 s and ±0.08 s; a band shows the uncertainty.

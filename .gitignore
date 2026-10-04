@@ -3,3 +3,4 @@ dist
 playtest-shots
 .cache
 balance
+.env

@@ -23,9 +23,9 @@ const TRIALS = Number(process.env.BALANCE_TRIALS ?? 32);
 const SEEDS = [1, 2, 3, 4];
 const MAX_ATTEMPTS = 500;
 /** Win chance after the next two upgrades should reach at least this. */
-const AFTER_TWO = 0.55;
+const AFTER_TWO = 0.45;
 /** Skills per sea the economy should allow. */
-const SKILLS_PER_SEA: [number, number] = [1, 2.5];
+const SKILLS_PER_SEA: [number, number] = [0.6, 1.3];
 /** More attempts than this on one sea counts as a grind. */
 const MAX_ATTEMPTS_PER_SEA = 12;
 /** Sea whose arrival loadout is used to measure each skill's value. */
@@ -35,10 +35,10 @@ const NO_VALUE_SKILLS = new Set(['chaos1', 'chaos2', 'salvage', 'amp1', 'perfect
 
 /** On-arrival win chance target: winnable first on sea 1, then progressively harder. */
 function arrivalTarget(index: number, count: number): number {
-  if (index === 0) return 0.65;
-  if (index === 1) return 0.4;
+  if (index === 0) return 0.5;
+  if (index === 1) return 0.3;
   const k = (index - 2) / Math.max(1, count - 3);
-  return 0.32 - k * 0.17;
+  return 0.25 - k * 0.15;
 }
 
 const t0 = performance.now();
@@ -245,7 +245,7 @@ function applyEffectScale(): void {
   }
 }
 /** The two most helpful next upgrades should lift win chance by at least this much (median sea). */
-const UPGRADE_LIFT = 0.25;
+const UPGRADE_LIFT = 0.2;
 
 const iterations: ReportData['iterations'] = [];
 let costScale = 1;
@@ -269,7 +269,7 @@ for (let iter = 1; iter <= ITERATIONS; iter++) {
   const lifts = tuned.slice(1).map((t) => t.p2 - t.p0);
   const lift = [...lifts].sort((a, b) => a - b)[Math.floor(lifts.length / 2)] ?? 0;
   if (lift < UPGRADE_LIFT) effectScale = Math.min(2.5, effectScale * 1.15);
-  else if (lift > UPGRADE_LIFT * 2) effectScale = Math.max(0.6, effectScale / 1.1);
+  else if (lift > UPGRADE_LIFT * 1.6) effectScale = Math.max(0.25, effectScale / 1.15);
   applyEffectScale();
   config.balance.effectScale = r2(effectScale);
   // Economy: about one or two skills per sea.

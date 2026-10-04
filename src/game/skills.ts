@@ -36,7 +36,12 @@ export interface Loadout {
   zoneBonus: number;
   salvage: number;
   perfectStorm: number;
-  /** +/- seconds of uncertainty in the timeline's crest-arrival marks. */
+  /** Whether the timeline shows crest-arrival marks at all (Seismograph). */
+  marks: boolean;
+  /**
+   * +/- seconds of uncertainty in those marks. Without marks it models how
+   * far off a player's own guess is (used by the simulated player).
+   */
   precision: number;
 }
 
@@ -122,13 +127,13 @@ export const SKILLS: readonly SkillDef[] = [
   S('power', 2.5, 6, 'harmonic', 'Harmonic Lock', 'harmonic', ['after2', 'train2'], (v) => `All waves ${pctOf(v)} taller.`, (l, v) => (l.mods.ampMul *= 1 + v)),
 
   // Timing: see and control when crests land.
-  S('timing', 4.5, 0, 'seis1', 'Seismograph', 'fine', [], (v) => `Crest marks on the timeline are accurate to ±${v.toFixed(2)} s.`, (l, v) => (l.precision = Math.min(l.precision, v))),
+  S('timing', 4.5, 0, 'seis1', 'Seismograph', 'fine', [], (v) => `Shows when each quake's crest reaches each city, roughly (±${v.toFixed(2)} s).`, (l, v) => seismograph(l, v)),
   S('timing', 4, 1, 'iso', 'Isochrones', 'rings', ['seis1'], () => 'While placing, see 1-second arrival rings spread from your cursor.', (l) => (l.isochrones = true)),
-  S('timing', 5, 1, 'seis2', 'Seismograph II', 'fine', ['seis1'], (v) => `Crest marks accurate to ±${v.toFixed(2)} s.`, (l, v) => (l.precision = Math.min(l.precision, v))),
+  S('timing', 5, 1, 'seis2', 'Seismograph II', 'fine', ['seis1'], (v) => `Crest marks accurate to ±${v.toFixed(2)} s.`, (l, v) => seismograph(l, v)),
   S('timing', 4, 2, 'fuse1', 'Long Fuse', 'fuse', ['iso'], (v) => `Delays can go ${v} s longer.`, (l, v) => (l.maxFuse += v)),
   S('timing', 5, 2, 'fine', 'Fine Fuse', 'fine', ['seis2'], (v) => `Set delays in ${v} s steps.`, (l, v) => (l.fuseStep = Math.min(l.fuseStep, v))),
   S('timing', 4, 3, 'oracle1', 'Oracle', 'eye', ['fuse1'], (v) => `${v} preview${v === 1 ? '' : 's'} per attempt of how much damage your plan would deal.`, (l, v) => (l.oracles += v)),
-  S('timing', 5, 3, 'seis3', 'Seismograph III', 'fine', ['fine'], (v) => `Crest marks accurate to ±${v.toFixed(2)} s.`, (l, v) => (l.precision = Math.min(l.precision, v))),
+  S('timing', 5, 3, 'seis3', 'Seismograph III', 'fine', ['fine'], (v) => `Crest marks accurate to ±${v.toFixed(2)} s.`, (l, v) => seismograph(l, v)),
   S('timing', 4, 4, 'oracle2', 'Clairvoyance', 'eye', ['oracle1'], (v) => `${v} more Oracle preview${v === 1 ? '' : 's'} per attempt.`, (l, v) => (l.oracles += v)),
   S('timing', 5, 4, 'fuse2', 'Fuse Mastery', 'fuse', ['seis3'], (v) => `Delays can go another ${v} s longer.`, (l, v) => (l.maxFuse += v)),
   S('timing', 4, 5, 'slow', 'Bullet Time', 'slow', ['oracle2'], () => 'Adds a 0.5× replay speed.', (l) => (l.slowMotion = true)),
@@ -165,6 +170,11 @@ function stretchPeriod(l: Loadout, v: number): void {
   l.rules.comboWindow *= 1 + v;
 }
 
+function seismograph(l: Loadout, v: number): void {
+  l.marks = true;
+  l.precision = Math.min(l.precision, v);
+}
+
 function addQuakes(l: Loadout, kind: QuakeKind, n: number): void {
   for (let i = 0; i < n; i++) l.bonusQuakes.push(kind);
 }
@@ -195,6 +205,7 @@ export function loadout(owned: ReadonlySet<string>): Loadout {
     zoneBonus: 0,
     salvage: CONFIG.chaos.salvage,
     perfectStorm: 1,
+    marks: false,
     precision: CONFIG.rules.arrivalPrecision,
   };
   for (const s of SKILLS) if (owned.has(s.id)) s.apply(l);
@@ -226,7 +237,7 @@ const STATS: { label: string; get: (l: Loadout) => string }[] = [
   { label: 'Extra waves per quake', get: (l) => `${l.mods.extraCycles}` },
   { label: 'Open-water energy loss', get: (l) => pctOf(l.openDamp / DEFAULT_OPEN_DAMP) },
   { label: 'Aftershocks', get: (l) => `${l.aftershocks}` },
-  { label: 'Crest mark accuracy', get: (l) => `±${l.precision.toFixed(2)} s` },
+  { label: 'Crest marks', get: (l) => (l.marks ? `±${l.precision.toFixed(2)} s` : 'None') },
   { label: 'Isochrones', get: (l) => onOff(l.isochrones) },
   { label: 'Max delay', get: (l) => `${l.maxFuse} s` },
   { label: 'Delay step', get: (l) => `${l.fuseStep} s` },

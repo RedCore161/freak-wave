@@ -783,8 +783,10 @@ export class Game {
     this.view.updateWater(sim ? sim.u : null, sim ? sim.env : null, this.phase === 'placing' ? this.isoField : null);
     this.view.updateCities(this.meters.map((m) => ({ damage: m.damage / m.spec.hp, ruined: m.ruined })));
     this.updateLabels();
-    const waterRatio = this.meters.map((m) => (sim ? Math.max(0, m.level) / m.wall : 0));
-    this.audio.update(sim ? sim.activity() : 0, waterRatio);
+    // Live audio only while the waves run; afterwards everything fades back to calm.
+    const live = this.phase === 'running' && this.sim ? this.sim : null;
+    const waterRatio = this.meters.map((m) => (live && !m.ruined ? Math.max(0, m.level) / m.wall : 0));
+    this.audio.update(live ? live.activity() : 0, waterRatio);
     if (this.phase === 'running' && this.sim) {
       this.ui.setProgress(this.sim.stepIndex / SIM_STEPS);
       this.ui.setTimeline(this.timelineData(), this.sim.time);
@@ -873,7 +875,8 @@ export class Game {
     const cities = level.cities.map((c, i) => ({
       name: c.name,
       ruined: this.meters[i]?.ruined ?? false,
-      arrivals: this.quakes
+      // Without a Seismograph the player has to read the waves themselves.
+      arrivals: (lo.marks ? this.quakes : [])
         .filter((q) => q.dist[this.shoreMouth[i]] !== Infinity)
         .map((q) => ({
           id: q.id,
@@ -921,10 +924,12 @@ export class Game {
         : 'Quakes have full power inside the green epicenters.';
     }
     if (this.quakes.length === 1 && this.level!.index === 0) {
-      return 'Place another. Then drag them on the timeline so their crests reach the city together.';
+      return 'Place another. The far one needs a head start: delay the near one on the timeline.';
     }
     if (this.selectedId !== null) return 'Drag on the map to move, on the timeline to delay.';
-    return 'Line up the crest marks under each city, then Unleash.';
+    return this.lo.marks
+      ? 'Line up the crest marks under each city, then Unleash.'
+      : 'Delay quakes on the timeline so their crests meet. The Seismograph skill shows when they arrive.';
   }
 
   private refreshHud(): void {

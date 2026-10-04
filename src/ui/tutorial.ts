@@ -54,7 +54,7 @@ export const TUTORIAL_SLIDES: Slide[] = [
   },
   {
     title: 'Time the crests',
-    body: 'Drag each quake along the timeline to delay it. The marks under each city show when the crests arrive. Line them up so the waves stack.',
+    body: 'Drag each quake along the timeline to delay it, so crests from near and far reach a city together. The Seismograph skill adds marks showing when each crest arrives.',
     svg: `${SEA}
       <text x="16" y="36" fill="#8aa6bf" font-size="11">Fire</text>
       <rect x="54" y="24" width="170" height="18" rx="5" fill="#ffffff10"/>
