@@ -37,6 +37,8 @@ export interface LevelData {
   /** A known solution the generator verified (debugging and playtests). */
   witness: QuakePlacement[];
   hint?: string;
+  /** Cities that must fall to pass (a share of all, bonus cities included). */
+  required: number;
   /** Witness quake indices each city relies on (shared quakes chain two cities). */
   groups: number[][];
   /** Best city's damage with all delays at zero, over its hp: below 1 means timing is required. */

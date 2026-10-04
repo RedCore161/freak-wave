@@ -1,0 +1,264 @@
+{
+  "rules": {
+    "baseAttempts": 3,
+    "maxPlaced": 3,
+    "passShare": 0.5,
+    "arrivalPrecision": 0.6
+  },
+  "chaos": {
+    "effort": 2,
+    "damagePerCityLevel": 5,
+    "ruinedPerCityLevel": 6,
+    "bonusPerCityLevel": 8,
+    "clearBase": 5,
+    "clearPerSea": 2,
+    "firstClearBonus": 0.5,
+    "salvage": 3,
+    "zoneMult": 1.5
+  },
+  "generator": {
+    "winShareStart": 0.85,
+    "winShareStep": 0.05,
+    "winShareMin": 0.3,
+    "samplePlans": 10,
+    "hpFraction": 0.85,
+    "wallOverSingle": 1.05,
+    "bonusWallOverSingle": 1.25,
+    "bonusHpOverWitness": 1.3,
+    "minWall": 1.5
+  },
+  "skills": {
+    "tremor1": {
+      "cost": 30,
+      "value": 1
+    },
+    "tremor2": {
+      "cost": 180,
+      "value": 1
+    },
+    "fault1": {
+      "cost": 130,
+      "value": 1
+    },
+    "pulse1": {
+      "cost": 45,
+      "value": 1
+    },
+    "fault2": {
+      "cost": 45,
+      "value": 1
+    },
+    "pulse2": {
+      "cost": 70,
+      "value": 1
+    },
+    "rift1": {
+      "cost": 515,
+      "value": 1
+    },
+    "rift2": {
+      "cost": 175,
+      "value": 1
+    },
+    "mega1": {
+      "cost": 215,
+      "value": 1
+    },
+    "mega2": {
+      "cost": 125,
+      "value": 1
+    },
+    "res1": {
+      "cost": 15,
+      "value": 0.08
+    },
+    "res2": {
+      "cost": 100,
+      "value": 0.08
+    },
+    "long1": {
+      "cost": 30,
+      "value": 0.12
+    },
+    "deep1": {
+      "cost": 15,
+      "value": 0.6
+    },
+    "long2": {
+      "cost": 35,
+      "value": 0.12
+    },
+    "res3": {
+      "cost": 30,
+      "value": 0.08
+    },
+    "train1": {
+      "cost": 265,
+      "value": 1
+    },
+    "after1": {
+      "cost": 85,
+      "value": 1
+    },
+    "train2": {
+      "cost": 120,
+      "value": 1
+    },
+    "after2": {
+      "cost": 70,
+      "value": 2
+    },
+    "harmonic": {
+      "cost": 110,
+      "value": 0.12
+    },
+    "seis1": {
+      "cost": 30,
+      "value": 0.35
+    },
+    "seis2": {
+      "cost": 40,
+      "value": 0.18
+    },
+    "seis3": {
+      "cost": 100,
+      "value": 0.06
+    },
+    "iso": {
+      "cost": 15,
+      "value": 1
+    },
+    "fuse1": {
+      "cost": 35,
+      "value": 3
+    },
+    "fine": {
+      "cost": 10,
+      "value": 0.05
+    },
+    "oracle1": {
+      "cost": 170,
+      "value": 1
+    },
+    "slow": {
+      "cost": 30,
+      "value": 1
+    },
+    "oracle2": {
+      "cost": 40,
+      "value": 1
+    },
+    "fuse2": {
+      "cost": 90,
+      "value": 3
+    },
+    "rhythm": {
+      "cost": 35,
+      "value": 0.5
+    },
+    "crescendo": {
+      "cost": 40,
+      "value": 0.1
+    },
+    "fortissimo": {
+      "cost": 70,
+      "value": 1
+    },
+    "ram1": {
+      "cost": 15,
+      "value": 0.15
+    },
+    "under1": {
+      "cost": 50,
+      "value": 0.08
+    },
+    "mirror1": {
+      "cost": 180,
+      "value": 0.4
+    },
+    "under2": {
+      "cost": 40,
+      "value": 0.08
+    },
+    "mirror2": {
+      "cost": 50,
+      "value": 0.4
+    },
+    "ram2": {
+      "cost": 50,
+      "value": 0.15
+    },
+    "domino": {
+      "cost": 45,
+      "value": 1
+    },
+    "under3": {
+      "cost": 95,
+      "value": 0.1
+    },
+    "ram3": {
+      "cost": 105,
+      "value": 0.2
+    },
+    "break1": {
+      "cost": 25,
+      "value": 1
+    },
+    "chaos1": {
+      "cost": 40,
+      "value": 0.25
+    },
+    "spawnR": {
+      "cost": 30,
+      "value": 0.25
+    },
+    "salvage": {
+      "cost": 50,
+      "value": 6
+    },
+    "spawnX": {
+      "cost": 90,
+      "value": 1
+    },
+    "amp1": {
+      "cost": 80,
+      "value": 0.5
+    },
+    "break2": {
+      "cost": 35,
+      "value": 1
+    },
+    "chaos2": {
+      "cost": 175,
+      "value": 0.25
+    },
+    "perfect": {
+      "cost": 235,
+      "value": 1.5
+    }
+  },
+  "levels": {},
+  "balance": {
+    "effectBase": {
+      "res1": 0.08,
+      "res2": 0.08,
+      "res3": 0.08,
+      "harmonic": 0.12,
+      "ram1": 0.15,
+      "ram2": 0.15,
+      "ram3": 0.2,
+      "rhythm": 0.5,
+      "crescendo": 0.1,
+      "deep1": 0.6,
+      "under1": 0.08,
+      "under2": 0.08,
+      "under3": 0.1,
+      "mirror1": 0.4,
+      "mirror2": 0.4,
+      "seis1": 0.35,
+      "seis2": 0.18,
+      "seis3": 0.06
+    },
+    "effectScale": 1
+  }
+}

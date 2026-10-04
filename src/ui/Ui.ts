@@ -46,6 +46,7 @@ export interface CityLabel {
   /** Shoreline height / wall, for the live gauge. */
   water: number;
   prediction: number | null;
+  bonus: boolean;
   /** Hovered, pinned or just hit: shown in full; otherwise a faded compact card. */
   active: boolean;
 }
@@ -67,6 +68,9 @@ export interface HudData {
   speed: number;
   running: boolean;
   muted: boolean;
+  /** Cities ruined so far and needed to pass. */
+  ruined: number;
+  required: number;
 }
 
 export interface TimelineData {
@@ -74,7 +78,7 @@ export interface TimelineData {
   maxFuse: number;
   step: number;
   quakes: { id: number; kind: QuakeKind; delay: number; selected: boolean }[];
-  cities: { name: string; ruined: boolean; arrivals: { id: number; kind: QuakeKind; t: number }[] }[];
+  cities: { name: string; ruined: boolean; arrivals: { id: number; kind: QuakeKind; t: number; spread?: number }[] }[];
 }
 
 export interface ResultCity {
@@ -163,7 +167,11 @@ export class Ui {
   // ---------------------------------------------------------------- HUD
 
   setHud(d: HudData): void {
-    this.hudLevel.replaceChildren(h('span', { class: 'hud-num' }, `Sea ${d.level}`), h('span', { class: 'hud-name' }, d.name));
+    this.hudLevel.replaceChildren(
+      h('span', { class: 'hud-num' }, `Sea ${d.level} · ruin ${d.ruined}/${d.required}`),
+      h('span', { class: 'hud-name' }, d.name),
+    );
+    this.hudLevel.classList.toggle('goal-met', d.ruined >= d.required);
     const left = d.attempts - d.attempt + 1;
     this.hudAttempts.replaceChildren(...Array.from({ length: d.attempts }, (_, k) => h('span', { class: k < left ? 'life' : 'life lost' })));
     this.hudChaos.textContent = `${d.chaos} chaos`;
@@ -318,12 +326,19 @@ export class Ui {
         h(
           'div',
           { class: 'tl-track thin' },
-          ...c.arrivals.map((a) =>
-            h('span', {
-              class: `tl-arrival${d.quakes.find((q) => q.id === a.id)?.selected ? ' selected' : ''}`,
-              style: `left: ${pct(a.t)}; --qc: ${QUAKE_TYPES[a.kind].color}`,
-            }),
-          ),
+          ...c.arrivals.flatMap((a) => {
+            const selected = d.quakes.find((q) => q.id === a.id)?.selected ? ' selected' : '';
+            const color = QUAKE_TYPES[a.kind].color;
+            // The band shows the Seismograph's uncertainty; the true crest lies inside it.
+            const band = a.spread
+              ? h('span', {
+                  class: `tl-band${selected}`,
+                  style: `left: ${pct(a.t - a.spread)}; width: ${((2 * a.spread) / d.duration) * 100}%; --qc: ${color}`,
+                })
+              : null;
+            const mark = h('span', { class: `tl-arrival${selected}`, style: `left: ${pct(a.t)}; --qc: ${color}` });
+            return band ? [band, mark] : [mark];
+          }),
         ),
       ),
     );
@@ -372,6 +387,7 @@ export class Ui {
       if (el.dataset.key === key) return;
       el.dataset.key = key;
       el.classList.toggle('ruined', c.ruined);
+      el.classList.toggle('bonus', c.bonus);
       const frac = Math.min(1, c.damage / c.hp);
       const pred =
         c.prediction !== null
@@ -381,7 +397,12 @@ export class Ui {
         h(
           'div',
           { class: 'city-card' },
-          h('div', { class: 'city-top' }, h('span', { class: 'city-lvl' }, `L${c.level}`), h('span', { class: 'city-name' }, c.ruined ? 'RUINED' : c.name)),
+          h(
+            'div',
+            { class: 'city-top' },
+            h('span', { class: `city-lvl${c.bonus ? ' bonus' : ''}` }, c.bonus ? `B${c.level}` : `L${c.level}`),
+            h('span', { class: 'city-name' }, c.ruined ? 'RUINED' : c.name),
+          ),
           h(
             'div',
             { class: 'city-stats' },
@@ -712,7 +733,7 @@ export class Ui {
     const ROW_H = 92;
     const pad = 46;
     const width = COL_W * 9 + pad * 2;
-    const height = ROW_H * 6 + pad * 2;
+    const height = ROW_H * 7 + pad * 2;
     const pos = (s: { col: number; row: number }) => ({ x: s.col * COL_W + pad, y: s.row * ROW_H + pad });
 
     const svg = document.createElementNS(svgNs, 'svg');

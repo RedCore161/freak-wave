@@ -38,7 +38,7 @@ entries.forEach((e: { name: string; image: string; quakes?: string[]; inventory?
   try {
     const level = generateLevel({ index, seed: seedFor(index), map, name: e.name, quakes: e.quakes as never, inventory: e.inventory as never });
     const ms = performance.now() - t0;
-    const cities = level.cities.map((c) => `L${c.level} wall ${c.protection} hp ${c.hp}`).join(' | ');
+    const cities = level.cities.map((c) => `${c.bonus ? "B" : "L"}${c.level} wall ${c.protection} hp ${c.hp}`).join(" | ") + ` (need ${level.required})`;
     console.log(
       `#${index + 1} ${e.name.padEnd(16)} ${ms.toFixed(0).padStart(5)} ms  timing ${level.timingRatio.toFixed(2)}  ` +
         `spawns ${map.spawns.length} zones ${level.zones.map((z) => z.threshold).join(',') || '-'}  ` +

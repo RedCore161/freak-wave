@@ -51,6 +51,7 @@ export function alignDelays(arrival: readonly number[][], groups: readonly numbe
   const t: (number | null)[] = arrival.map(() => null);
   if (t.length === 0) return [];
   groups.forEach((group, c) => {
+    if (group.length === 0) return;
     // Anchor on a quake already timed by an earlier group, else on the latest arrival.
     let anchor = group.find((q) => t[q] !== null);
     if (anchor === undefined) {
@@ -67,4 +68,19 @@ export function alignDelays(arrival: readonly number[][], groups: readonly numbe
   const times = t.map((v) => v ?? 0);
   const earliest = Math.min(...times);
   return times.map((v) => Math.min(maxFuse, Math.round((v - earliest) / step) * step));
+}
+
+/**
+ * Stable pseudo-random offset in [-1, 1] for a quake's crest mark at a city.
+ * Scaled by the Seismograph precision it makes marks honest but fuzzy: the
+ * true arrival lies within +/- precision of the mark, and the error only
+ * changes when the quake moves.
+ */
+export function markOffset(x: number, y: number, city: number, kind: string): number {
+  let h = Math.imul(Math.round(x) * 73856093, 1) ^ Math.imul(Math.round(y), 19349663) ^ Math.imul(city + 1, 83492791);
+  for (let i = 0; i < kind.length; i++) h = Math.imul(h ^ kind.charCodeAt(i), 2654435761);
+  h ^= h >>> 15;
+  h = Math.imul(h, 2246822519);
+  h ^= h >>> 13;
+  return ((h >>> 0) / 4294967295) * 2 - 1;
 }

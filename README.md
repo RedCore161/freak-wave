@@ -135,3 +135,65 @@ Five branches, 49 skills, with placeholder SVG icons in `src/ui/icons.ts`:
 | Timing | Isochrones, Long/Fine Fuse, **Oracle** (damage preview), Bullet Time, combo upgrades |
 | Destruction | Battering Ram, Undertow/Erosion (lower walls), Mirror Coast, **Domino** (ruined cities set off quakes) |
 | Fortune | Extra attempts, Chaos Theory, wider and extra epicenters, Salvage, Amplifier, Perfect Storm |
+
+## Balancing
+
+All balance numbers live in **`config.json`** at the project root: rules
+(attempts, quakes per sea, pass share, crest-mark precision), chaos rewards,
+generator targets, every skill's cost and effect size, and per-sea overrides
+(`levels["<sea index>"]`: `hpMul`, `wallMul`, `bonusHpMul`, `bonusWallMul`,
+and exact `cities["<i>"]: { hp, wall }`). The game, the level generator and
+the scripts all read it through `src/config.ts`.
+
+### Balancing mode
+
+```sh
+npm run dev:balance          # or: BALANCING_MODE=1 npm run dev
+```
+
+Adds a **⚖ Balance** drawer in the game: edit the current sea's multipliers
+and per-city hp and walls (live), rules, chaos rewards and skills; estimate
+the win chance of a fresh player or of your current skills with the same
+simulated player the auto-balancer uses; cheats (chaos, unlock seas, reset
+skills, show the solution); **Save config.json**, **Run auto-balance** and
+**Open report**. Saving does not reload the page. After editing `config.json`
+by hand or running the balancer, reload. Balancing mode never ships in a build.
+
+### Auto-balance
+
+```sh
+npm run balance              # tune and write config.json + balance/report.html
+npm run balance -- --dry     # report only
+```
+
+`scripts/balance.ts` plays the campaign with a simulated player
+(`src/balance/model.ts`) from a fresh save. The player fields its best quakes
+(merging as needed), places them in the right epicenters with some error, reads
+the timeline's fuzzy crest marks and buys the cheapest skills between attempts
+(`src/balance/progression.ts`). Each round it:
+
+1. records when the player reaches each sea and what it owns,
+2. bisects each sea's hp multiplier so the **on-arrival** win chance hits a
+   target: 65% on sea 1, about 40% on sea 2, falling to about 15% by sea 12
+   (most seas are not cleared on the first try),
+3. checks that the **two most helpful next upgrades** lift it to at least 55%,
+   softening the sea if not,
+4. scales skill effect sizes if upgrades matter too little or too much, and
+   skill costs if the economy buys more or fewer than 1–2.5 skills per sea,
+5. halfway through, nudges each skill's cost toward its measured value.
+
+The report (`balance/report.html`, also served in balancing mode) shows chaos
+banked and sea reached over the campaign, win chance per sea against its target,
+attempts per sea, and per-skill value and costs. Evaluation runs in parallel
+worker threads. Generated levels are cached in `.cache/`.
+
+## Bonus cities and the Seismograph
+
+Maps can mark **bonus cities** (`#00FFFF` cyan): harder cities with higher
+walls and more hp than the verified solution delivers. A sea is cleared by
+ruining half of all its cities (`rules.passShare`), so bonus cities are
+optional extra chaos, or an alternative target.
+
+Crest marks on the timeline are **fuzzy**: each mark is offset by up to
+± `rules.arrivalPrecision` seconds (0.6 s by default), and a band shows the
+uncertainty. The **Seismograph I–III** skills shrink it.

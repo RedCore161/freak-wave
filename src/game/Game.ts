@@ -7,7 +7,7 @@ import { WaveSim } from '../sim/WaveSim.ts';
 import { pickSpawns } from '../level/generator.ts';
 import { campaignNames, LevelSource } from '../level/levels.ts';
 import { placementProblem, quakePower } from '../level/placement.ts';
-import { MAX_PLACED, MERGE_COUNT, MERGE_INTO } from '../level/plan.ts';
+import { markOffset, MAX_PLACED, MERGE_COUNT, MERGE_INTO } from '../level/plan.ts';
 import { distanceTo } from '../level/terrain.ts';
 import type { LevelData, SpawnArea } from '../level/types.ts';
 import { SceneView } from '../render/SceneView.ts';
@@ -15,7 +15,9 @@ import { Sonifier } from '../audio/Sonifier.ts';
 import type { ResultCity, Ui } from '../ui/Ui.ts';
 import { loadSave, writeSave } from './save.ts';
 import { loadSettings, writeSettings, type Settings } from './settings.ts';
-import { AFTERSHOCK_DELAY, AFTERSHOCK_STRENGTH, canBuy, loadout, SKILL_BY_ID, ZONE_BASE_MULT, type Loadout } from './skills.ts';
+import { AFTERSHOCK_DELAY, AFTERSHOCK_STRENGTH, canBuy, loadout, SKILL_BY_ID, zoneBaseMult, type Loadout } from './skills.ts';
+import { CONFIG } from '../config.ts';
+import { applyOverrides } from '../level/overrides.ts';
 
 type Phase = 'menu' | 'loading' | 'placing' | 'running' | 'result' | 'gameover';
 
@@ -74,6 +76,8 @@ export class Game {
   private phase: Phase = 'menu';
   private run: RunState | null = null;
   private level: LevelData | null = null;
+  /** The level as generated, before config.json overrides. */
+  private baseLevel: LevelData | null = null;
   private spawns: SpawnArea[] = [];
   private shoreMouth: number[] = [];
   private attempt = 1;
@@ -282,7 +286,8 @@ export class Game {
     if (this.run !== run) return;
     // Generate the next level while this one is played.
     void this.levels.get(run.index + 1).catch(() => undefined);
-    this.level = level;
+    this.baseLevel = level;
+    this.level = applyOverrides(level);
     this.spawns = this.buildSpawns(level);
     this.shoreMouth = level.cities.map((c) => {
       let best = c.shore[0];
@@ -308,7 +313,7 @@ export class Game {
     this.audio.setCities(level.cities.length);
     this.enterPlacing();
     if (level.hint) this.ui.setHint(level.hint);
-    this.ui.banner(level.name, 'cool', `Sea ${level.index + 1} · ${level.cities.length} ${level.cities.length === 1 ? 'city' : 'cities'}`);
+    this.ui.banner(level.name, 'cool', `Sea ${level.index + 1} · ruin ${level.required} of ${level.cities.length} ${level.cities.length === 1 ? 'city' : 'cities'}`);
   }
 
   /** The level's epicenters, widened and extended by skills. */
@@ -598,7 +603,7 @@ export class Game {
           this.zoneHit[i] = true;
           this.view.setZoneHit(i, true);
           this.audio.arpeggio([784, 1046, 1318], 0.05, 0.1);
-          this.ui.banner(`×${(ZONE_BASE_MULT + this.lo.zoneBonus).toFixed(1)} chaos`, 'warm', 'Golden ring breached');
+          this.ui.banner(`×${(zoneBaseMult() + this.lo.zoneBonus).toFixed(1)} chaos`, 'warm', 'Golden ring breached');
         }
       });
       if (this.allRuinedStep < 0 && this.meters.every((m) => m.ruined)) this.allRuinedStep = sim.stepIndex;
@@ -655,12 +660,17 @@ export class Game {
     const run = this.run!;
     const level = this.level!;
     const lo = this.lo;
-    const success = this.meters.every((m) => m.ruined);
+    const ruinedCount = this.meters.filter((m) => m.ruined).length;
+    const success = ruinedCount >= level.required;
+    const C = CONFIG.chaos;
     const lines: { label: string; value: string }[] = [];
     let chaos = 0;
-    const ruinedValue = this.meters.reduce((a, m) => a + (m.ruined ? 6 * m.spec.level : 0), 0);
+    const ruinedValue = this.meters.reduce(
+      (a, m) => a + (m.ruined ? (m.spec.bonus ? C.bonusPerCityLevel : C.ruinedPerCityLevel) * m.spec.level : 0),
+      0,
+    );
     if (success) {
-      const clear = 5 + 2 * level.index;
+      const clear = C.clearBase + C.clearPerSea * level.index;
       lines.push({ label: 'Cities ruined', value: `+${ruinedValue}` });
       lines.push({ label: 'Coast drowned', value: `+${clear}` });
       chaos = ruinedValue + clear;
@@ -670,14 +680,14 @@ export class Game {
         chaos += unused * lo.salvage;
       }
       if (!this.save.cleared.includes(level.index)) {
-        const bonus = Math.round(chaos * 0.5);
+        const bonus = Math.round(chaos * C.firstClearBonus);
         lines.push({ label: 'First clear', value: `+${bonus}` });
         chaos += bonus;
       }
     } else {
       // Every attempt pays something, so nobody gets stuck without upgrades.
-      const effort = 2;
-      const dealt = Math.round(this.meters.reduce((a, m) => a + Math.min(1, m.damage / m.spec.hp) * 5 * m.spec.level, 0));
+      const effort = C.effort;
+      const dealt = Math.round(this.meters.reduce((a, m) => a + Math.min(1, m.damage / m.spec.hp) * C.damagePerCityLevel * m.spec.level, 0));
       lines.push({ label: 'Effort', value: `+${effort}` });
       if (dealt > 0) lines.push({ label: 'Damage dealt', value: `+${dealt}` });
       chaos = effort + dealt;
@@ -689,8 +699,8 @@ export class Game {
       chaos = boosted;
     };
     const zones = this.zoneHit.filter(Boolean).length;
-    for (let z = 0; z < zones; z++) mult(ZONE_BASE_MULT + lo.zoneBonus, 'Golden ring');
-    if (success && this.attempt === 1 && lo.perfectStorm) mult(1.5, 'Perfect Storm');
+    for (let z = 0; z < zones; z++) mult(zoneBaseMult() + lo.zoneBonus, 'Golden ring');
+    if (success && this.attempt === 1) mult(lo.perfectStorm, 'Perfect Storm');
     mult(lo.chaosMul, 'Chaos Theory');
 
     run.chaosEarned += chaos;
@@ -829,6 +839,7 @@ export class Game {
           ruined: m.ruined,
           water: this.sim && this.phase !== 'placing' ? Math.max(0, m.level) / m.wall : 0,
           prediction: this.phase === 'placing' && this.prediction ? this.prediction[i] : null,
+          bonus: !!m.spec.bonus,
           active,
         };
       }),
@@ -836,7 +847,7 @@ export class Game {
     this.ui.setZoneLabels(
       level.zones.map((z, i) => {
         const pos = this.view.project(z.x, z.y, z.threshold);
-        return { x: pos.x, y: pos.y, threshold: z.threshold, mult: ZONE_BASE_MULT + this.lo.zoneBonus, hit: this.zoneHit[i] };
+        return { x: pos.x, y: pos.y, threshold: z.threshold, mult: zoneBaseMult() + this.lo.zoneBonus, hit: this.zoneHit[i] };
       }),
     );
     const sel = this.phase === 'placing' && !this.drag ? this.selected() : undefined;
@@ -864,7 +875,12 @@ export class Game {
       ruined: this.meters[i]?.ruined ?? false,
       arrivals: this.quakes
         .filter((q) => q.dist[this.shoreMouth[i]] !== Infinity)
-        .map((q) => ({ id: q.id, kind: q.kind, t: q.delay + crestArrival(q.kind, lo.mods, q.dist[this.shoreMouth[i]]) })),
+        .map((q) => ({
+          id: q.id,
+          kind: q.kind,
+          t: q.delay + crestArrival(q.kind, lo.mods, q.dist[this.shoreMouth[i]]) + markOffset(q.x, q.y, i, q.kind) * lo.precision,
+          spread: lo.precision,
+        })),
     }));
     const latest = Math.max(0, ...cities.flatMap((c) => c.arrivals.map((a) => a.t)));
     return {
@@ -922,7 +938,46 @@ export class Game {
       speed: this.speed,
       running: this.phase === 'running',
       muted: this.audio.muted,
+      ruined: this.meters.filter((m) => m.ruined).length,
+      required: this.level.required,
     });
+  }
+
+  // ---------------------------------------------------------------- balancing mode
+
+  /** Snapshot for the balancing panel. */
+  balanceInfo() {
+    return { level: this.level, base: this.baseLevel, owned: [...this.owned], phase: this.phase, chaos: this.save.chaos };
+  }
+
+  /** Re-applies config.json values (edited live) to the current sea. */
+  reapplyConfig(): void {
+    if (!this.baseLevel) return;
+    this.level = applyOverrides(this.baseLevel);
+    if (this.phase === 'placing') {
+      this.meters = this.level.cities.map((c) => new CityMeter(c, this.lo.rules));
+      this.prediction = null;
+      this.refreshPlacing(false);
+    }
+    this.refreshHud();
+  }
+
+  cheatChaos(amount: number): void {
+    this.save.chaos += amount;
+    writeSave(this.save);
+    this.refreshHud();
+  }
+
+  cheatUnlock(upTo: number): void {
+    this.save.unlocked = Math.max(this.save.unlocked, upTo);
+    writeSave(this.save);
+  }
+
+  cheatResetSkills(): void {
+    this.owned.clear();
+    this.save.skills = [];
+    writeSave(this.save);
+    this.refreshPlacing(false);
   }
 
   // ---------------------------------------------------------------- debug

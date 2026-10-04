@@ -21,6 +21,7 @@ import { placementProblem, quakePower } from './placement.ts';
 import { alignDelays, MAX_PLACED, MERGE_COUNT, MERGE_INTO, obtainableKinds, planGroups } from './plan.ts';
 import { distanceTo, generateIslands } from './terrain.ts';
 import type { ChaosZone, LevelData, LevelRequest, QuakePlacement, SpawnArea } from './types.ts';
+import { CONFIG } from '../config.ts';
 
 // Levels are built backwards from the cities using reciprocity: the crest a
 // quake at P produces at city C (and when it arrives) equals what a quake at C
@@ -40,16 +41,13 @@ const MAX_ATTEMPTS = 8;
 const GOOD_TIMING_RATIO = 0.7;
 const CITY_SEPARATION = 30;
 const SPAWN_CITY_DISTANCE = 38;
-const MIN_WALL = 1.5;
-/** HP never exceeds this share of the witness damage, so the solution always wins. */
-const HP_FRACTION = 0.85;
-/** Imperfect plans played per level to calibrate walls and hp. */
-const SAMPLE_PLANS = 10;
-/** Single quakes stay below the wall by this factor (unless that makes the level unfair). */
-const WALL_OVER_SINGLE = 1.05;
+// Tunables (config.json "generator"): minWall; hpFraction (hp never exceeds this
+// share of the witness damage, so the solution always wins); samplePlans
+// (imperfect plans played per level); wallOverSingle (single quakes stay below
+// the wall by this factor); bonus* (how much harder bonus cities are).
+const G = () => CONFIG.generator;
 /** Cities that would fall to a sliver of overflow are rejected as trivial. */
 const MIN_WITNESS_DAMAGE = 2;
-export const ZONE_MULT = 1.5;
 
 export function landFraction(index: number): number {
   return Math.min(0.28, 0.12 + index * 0.02);
@@ -69,7 +67,7 @@ export function cityLevels(index: number, rng: () => number): number[] {
  * Generous at first, tighter later.
  */
 export function winShare(index: number): number {
-  return Math.max(0.3, 0.85 - index * 0.05);
+  return Math.max(G().winShareMin, G().winShareStart - index * G().winShareStep);
 }
 
 function quantile(sorted: readonly number[], q: number): number {
@@ -109,6 +107,9 @@ interface Site {
 interface Layout {
   sites: Site[];
   levels: number[];
+  /** Optional harder cities; not part of the verified solution. */
+  bonusSites: Site[];
+  bonusLevels: number[];
   spawns: SpawnArea[];
   /** Fixed ring positions from a map, or null to choose them. */
   zoneSpots: { x: number; y: number }[] | null;
@@ -146,13 +147,23 @@ export function generateLevel(req: LevelRequest): LevelData {
   const coast = distanceTo(land, 1, 32);
 
   let fixed: Layout | null = null;
-  if (map && map.cities.length > 0) {
-    const sites = map.cities.map((c) => siteAt(land, c.x, c.y, 3));
-    if (sites.some((s) => !s)) throw new Error(`${name}: a city marker is not on a coast`);
-    if (sites.length > 2) throw new Error(`${name}: at most two cities per sea (three quakes)`);
+  if (map && map.cities.some((c) => !c.bonus)) {
+    const core = map.cities.filter((c) => !c.bonus);
+    const extra = map.cities.filter((c) => c.bonus);
+    const sites = core.map((c) => siteAt(land, c.x, c.y, 3));
+    const bonusSites = extra.map((c) => siteAt(land, c.x, c.y, 3));
+    if ([...sites, ...bonusSites].some((s) => !s)) throw new Error(`${name}: a city marker is not on a coast`);
+    if (sites.length > 2) throw new Error(`${name}: at most two core cities per sea (three quakes)`);
     const spawns = map.spawns.length > 0 ? map.spawns : pickSpawns(rng, land, coast, sites as Site[], 3, []);
     if (!spawns) throw new Error(`${name}: could not place epicenters`);
-    fixed = { sites: sites as Site[], levels: map.cities.map((c) => c.level), spawns, zoneSpots: map.zones };
+    fixed = {
+      sites: sites as Site[],
+      levels: core.map((c) => c.level),
+      bonusSites: bonusSites as Site[],
+      bonusLevels: extra.map((c) => c.level),
+      spawns,
+      zoneSpots: map.zones,
+    };
   }
 
   let best: Candidate | null = null;
@@ -180,17 +191,20 @@ export function generateLevel(req: LevelRequest): LevelData {
     witness: best.witness,
     timingRatio: best.timingRatio,
     groups: best.groups,
+    required: Math.max(1, Math.ceil(best.cities.length * CONFIG.rules.passShare - 1e-9)),
     hint: req.hint,
   };
 }
 
 function randomLayout(rng: () => number, index: number, land: Uint8Array, coast: Uint8Array): Layout | null {
   const levels = cityLevels(index, rng);
-  const sites = pickCitySites(rng, land, levels.length);
+  const sites = pickCitySites(rng, land, levels.length, []);
   if (!sites) return null;
-  const spawns = pickSpawns(rng, land, coast, sites, spawnCount(index), []);
+  // As many bonus cities as core ones, so passing means ruining one of each pair.
+  const bonusSites = index >= 1 ? pickCitySites(rng, land, levels.length, sites) ?? [] : [];
+  const spawns = pickSpawns(rng, land, coast, [...sites, ...bonusSites], spawnCount(index), []);
   if (!spawns) return null;
-  return { sites, levels, spawns, zoneSpots: null };
+  return { sites, levels, bonusSites, bonusLevels: bonusSites.map(() => 2), spawns, zoneSpots: null };
 }
 
 function tryBuild(
@@ -202,7 +216,8 @@ function tryBuild(
   quakes?: QuakeKind[],
   inventoryOverride?: QuakeKind[],
 ): Candidate | null {
-  const { sites, levels, spawns } = layout;
+  const { sites, levels, spawns, bonusSites, bonusLevels } = layout;
+  const allSites = [...sites, ...bonusSites];
   // A map may fix the solution's quake types; otherwise roll them.
   const kinds = quakes && quakes.length >= 2 && quakes.length <= MAX_PLACED ? [...quakes] : solutionKinds(index, sites.length, rng);
   const groups = planGroups(sites.length, kinds.length);
@@ -212,7 +227,7 @@ function tryBuild(
   for (const k of kinds) fieldable.add(k);
 
   // Reverse simulations: one per city and quake type.
-  const responses = sites.map((s) => {
+  const responses = allSites.map((s) => {
     const byKind = new Map<QuakeKind, Response>();
     for (const kind of fieldable) {
       const sim = new WaveSim(land, { trackPeak: true, trackPeakTime: true });
@@ -223,8 +238,8 @@ function tryBuild(
     }
     return byKind;
   });
-  const spawnCells = cellsInSpawns(land, spawns, sites);
-  const reach = reachableCells(land, spawns, sites);
+  const spawnCells = cellsInSpawns(land, spawns, allSites);
+  const reach = reachableCells(land, spawns, allSites);
   if (spawnCells.length === 0) return null;
 
   // Witness: for each quake the spawn cell that serves its cities best
@@ -263,9 +278,9 @@ function tryBuild(
     return { kind: kinds[q], x, y: (cell - x) / GRID_W, delay: delays[q], angle: 0 };
   });
 
-  const timed = forwardSeries(land, sites, witness, true);
-  const flat = forwardSeries(land, sites, witness, false);
-  const samples = samplePlans(rng, land, sites, spawns, witness, groups);
+  const timed = forwardSeries(land, allSites, witness, true);
+  const flat = forwardSeries(land, allSites, witness, false);
+  const samples = samplePlans(rng, land, allSites, spawns, witness, groups);
   // With several cities every one must fall, so each needs a higher share.
   const share = Math.pow(winShare(index), 1 / sites.length);
 
@@ -282,7 +297,7 @@ function tryBuild(
     // Crest that the target share of imperfect plans reaches.
     const sampleCrests = samples.map((sm) => Math.max(...sm[c])).sort((a, b) => a - b);
     const typical = quantile(sampleCrests, 1 - share);
-    let wall = Math.min(Math.max(MIN_WALL, single * WALL_OVER_SINGLE), typical * 0.85, crest * 0.9);
+    let wall = Math.min(Math.max(G().minWall, single * G().wallOverSingle), typical * 0.85, crest * 0.9);
     if (wall < crest * 0.35) {
       if (!relaxed) return null;
     }
@@ -291,13 +306,13 @@ function tryBuild(
     if (damage < (relaxed ? 0.3 : MIN_WITNESS_DAMAGE)) return null;
     const sampleDamage = samples.map((sm) => replayDamage(sm[c], wall)).sort((a, b) => a - b);
     const target = quantile(sampleDamage, 1 - share) * 0.95;
-    let hp = Math.max(0.8, Math.min(damage * HP_FRACTION, target));
+    let hp = Math.max(0.8, Math.min(damage * G().hpFraction, target));
     const flatDamage = replayDamage(flat.series[c], wall);
     // From the third sea on, firing everything at once should not be enough,
     // as long as that keeps most of the intended share of fair plans winning.
     if (index >= 2) {
       const fairCap = quantile(sampleDamage, 1 - share * 0.6) * 0.95;
-      hp = Math.max(hp, Math.min(flatDamage * 1.1, damage * HP_FRACTION, fairCap));
+      hp = Math.max(hp, Math.min(flatDamage * 1.1, damage * G().hpFraction, fairCap));
     }
     walls.push(wall);
     hps.push(hp);
@@ -311,7 +326,7 @@ function tryBuild(
   // A margin on top: sampling is noisy and two-city outcomes are fragile.
   const target = Math.min(0.95, winShare(index) + 0.1);
   for (let iter = 0; iter < 16 && sites.length > 1; iter++) {
-    const dmg = samples.map((sm) => sm.map((series, c) => replayDamage(series, walls[c])));
+    const dmg = samples.map((sm) => sites.map((_, c) => replayDamage(sm[c], walls[c])));
     const wins = dmg.filter((d) => d.every((v, c) => v >= hps[c])).length / samples.length;
     if (wins >= target) break;
     const fails = sites.map((_, c) => dmg.filter((d) => d[c] < hps[c]).length);
@@ -324,7 +339,7 @@ function tryBuild(
   const cities: CitySpec[] = [];
   let timingRatio = Infinity;
   for (let c = 0; c < sites.length; c++) {
-    const hp = Math.round(Math.min(hps[c], replayDamage(timed.series[c], walls[c]) * HP_FRACTION) * 10) / 10;
+    const hp = Math.round(Math.min(hps[c], replayDamage(timed.series[c], walls[c]) * G().hpFraction) * 10) / 10;
     timingRatio = Math.min(timingRatio, replayDamage(flat.series[c], walls[c]) / Math.max(hp, 0.1));
     cities.push({
       name: `${pick(rng, CITY_A)} ${pick(rng, CITY_B)}`,
@@ -336,6 +351,28 @@ function tryBuild(
       shore: sites[c].shore,
     });
   }
+  // Bonus cities: walls above what any single quake reaches (by a wider
+  // margin than core cities) and hp above what the verified solution or any
+  // sample plan deals, so they take upgrades or a dedicated plan.
+  bonusSites.forEach((site, b) => {
+    const c = sites.length + b;
+    let single = 0;
+    for (const r of responses[c].values()) reach.cells.forEach((cell, i) => (single = Math.max(single, r.peak[cell] * reach.power[i])));
+    const wall = Math.max(G().minWall, single * G().bonusWallOverSingle);
+    const fromWitness = replayDamage(timed.series[c], wall) * G().bonusHpOverWitness;
+    const fromSamples = Math.max(0, ...samples.map((sm) => replayDamage(sm[c], wall))) * 1.1;
+    const hp = Math.max(2 + bonusLevels[b], fromWitness, fromSamples);
+    cities.push({
+      name: `${pick(rng, CITY_A)} ${pick(rng, CITY_B)}`,
+      x: site.x,
+      y: site.y,
+      level: bonusLevels[b],
+      protection: Math.round(wall * 10) / 10,
+      hp: Math.round(hp * 10) / 10,
+      shore: site.shore,
+      bonus: true,
+    });
+  });
   void witnessDamage;
   void flatDamages;
   return { cities, spawns, witness, inventory, timingRatio, peakField: timed.peak, groups };
@@ -355,7 +392,8 @@ function samplePlans(
   groups: readonly number[][],
 ): Float32Array[][] {
   const out: Float32Array[][] = [];
-  for (let n = 0; n < SAMPLE_PLANS; n++) {
+  const precision = CONFIG.rules.arrivalPrecision;
+  for (let n = 0; n < G().samplePlans; n++) {
     const plan = witness.map((w) => {
       const sp = spawns.find((s) => Math.hypot(s.x - w.x, s.y - w.y) <= s.r + 0.5);
       let x = w.x;
@@ -375,7 +413,7 @@ function samplePlans(
     });
     const arrival = plan.map((q) => {
       const dist = waterDistanceField(land, q.x, q.y);
-      return sites.map((site) => crestArrival(q.kind, NO_MODS, dist[site.mouth]));
+      return sites.map((site) => crestArrival(q.kind, NO_MODS, dist[site.mouth]) + (rng() * 2 - 1) * precision);
     });
     const delays = alignDelays(arrival, groups, BASE_MAX_FUSE, BASE_FUSE_STEP);
     plan.forEach((q, i) => (q.delay = delays[i]));
@@ -436,14 +474,14 @@ function siteAt(land: Uint8Array, x: number, y: number, minShore: number): Site 
   return { x, y, shore, mouth };
 }
 
-function pickCitySites(rng: () => number, land: Uint8Array, count: number): Site[] | null {
+function pickCitySites(rng: () => number, land: Uint8Array, count: number, avoid: readonly Site[]): Site[] | null {
   const margin = SPONGE + 3;
   const sites: Site[] = [];
   for (let tries = 0; tries < 3000 && sites.length < count; tries++) {
     const x = margin + Math.floor(rng() * (GRID_W - 2 * margin));
     const y = margin + Math.floor(rng() * (GRID_H - 2 * margin));
     if (!land[y * GRID_W + x]) continue;
-    if (sites.some((s) => Math.hypot(s.x - x, s.y - y) < CITY_SEPARATION)) continue;
+    if ([...avoid, ...sites].some((s) => Math.hypot(s.x - x, s.y - y) < CITY_SEPARATION)) continue;
     // A city needs open water in front of it, but must sit on the coast.
     const site = siteAt(land, x, y, 10);
     if (site) sites.push(site);
@@ -521,7 +559,7 @@ function zonesAt(spots: readonly { x: number; y: number }[], c: Candidate): Chao
     x: s.x,
     y: s.y,
     threshold: Math.max(1.5, Math.floor(peakAround(c.peakField, s.x, s.y) * 0.85 * 10) / 10),
-    mult: ZONE_MULT,
+    mult: CONFIG.chaos.zoneMult,
   }));
 }
 

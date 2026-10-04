@@ -17,6 +17,8 @@ export interface CitySpec {
   hp: number;
   /** Water cells whose height counts as this city's shoreline. */
   shore: number[];
+  /** Optional, harder city: only a share of all cities must fall to pass. */
+  bonus?: boolean;
 }
 
 export interface DamageRules {

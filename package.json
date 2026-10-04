@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "levels": "node scripts/make-levels.mjs",
-    "calibrate": "node scripts/calibrate.ts"
+    "calibrate": "node scripts/calibrate.ts",
+    "balance": "node scripts/balance.ts",
+    "dev:balance": "vite --mode balancing"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

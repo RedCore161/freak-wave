@@ -9,6 +9,7 @@
 //   #FF0000 red        city level 1 (paint a dot on the coast)
 //   #FF8000 orange     city level 2
 //   #FF00FF magenta    city level 3
+//   #00FFFF cyan       bonus city (harder, optional; half of all cities must fall)
 //   #00FF00 green      epicenter (a filled disc; its size is the radius)
 //   #FFFF00 yellow     golden chaos ring (a small dot)
 // Keep features ~24 px away from the edges: the border is open ocean.
@@ -21,6 +22,7 @@ const H = 200;
 
 const LAND = [52, 64, 48];
 const CITY = { 1: [255, 0, 0], 2: [255, 128, 0], 3: [255, 0, 255] };
+const BONUS = [0, 255, 255];
 const SPAWN = [0, 255, 0];
 const ZONE = [255, 255, 0];
 
@@ -51,7 +53,7 @@ const levels = [
     hint: 'The far epicenter needs a head start: give the near quake a delay so both crests arrive together.',
     quakes: ['small', 'small'],
     land: ellipse(205, 100, 34, 26, 1),
-    cities: [[172, 100, 1]],
+    cities: [[172, 100, 1], [205, 76, 2, 'bonus']],
     spawns: [[70, 58, 18], [62, 160, 16]],
     zones: [],
   },
@@ -61,7 +63,7 @@ const levels = [
     hint: 'Big distance differences need big delays. Drag the near quake far along the timeline.',
     quakes: ['small', 'medium'],
     land: union(rect(250, 20, 320, 180), ellipse(252, 100, 12, 40, 4)),
-    cities: [[241, 100, 1]],
+    cities: [[241, 100, 1], [251, 40, 2, 'bonus']],
     spawns: [[56, 44, 18], [150, 160, 16]],
     zones: [[150, 92]],
   },
@@ -71,7 +73,7 @@ const levels = [
     hint: 'The wall blocks everything except the gap. Waves spread out again behind it.',
     quakes: ['small', 'medium'],
     land: union(minus(rect(40, 95, 280, 105), rect(150, 90, 172, 110)), rect(100, 165, 220, 200)),
-    cities: [[160, 164, 1]],
+    cities: [[160, 164, 1], [240, 105, 2, 'bonus']],
     spawns: [[132, 38, 16], [194, 50, 16]],
     zones: [[161, 72]],
   },
@@ -82,7 +84,7 @@ const levels = [
     quakes: ['medium', 'small', 'small'],
     inventory: ['small', 'small', 'small', 'small', 'small'],
     land: minus(union(rect(215, 20, 320, 180), ellipse(218, 100, 10, 70, 2)), rect(205, 86, 272, 114)),
-    cities: [[273, 100, 2]],
+    cities: [[273, 100, 2], [216, 40, 2, 'bonus']],
     spawns: [[60, 48, 18], [86, 158, 18], [150, 34, 14]],
     zones: [[150, 100]],
   },
@@ -92,7 +94,7 @@ const levels = [
     hint: 'Two cities, three quakes: the middle one must serve both. Time a partner for each city.',
     quakes: ['medium', 'medium', 'small'],
     land: union(ellipse(75, 110, 30, 36, 5), ellipse(245, 90, 28, 40, 6)),
-    cities: [[104, 110, 1], [218, 90, 1]],
+    cities: [[104, 110, 1], [218, 90, 1], [75, 75, 2, 'bonus'], [245, 129, 2, 'bonus']],
     spawns: [[150, 32, 16], [176, 168, 16]],
     zones: [],
   },
@@ -109,7 +111,7 @@ const levels = [
       ellipse(116, 100, 8, 8, 5),
       ellipse(252, 100, 24, 22, 6),
     ),
-    cities: [[228, 100, 2]],
+    cities: [[228, 100, 2], [172, 59, 2, 'bonus']],
     spawns: [[42, 42, 15], [44, 158, 15], [160, 36, 13]],
     zones: [[160, 104]],
   },
@@ -120,7 +122,7 @@ const levels = [
     quakes: ['small', 'medium', 'small'],
     inventory: ['small', 'small', 'small', 'small', 'medium'],
     land: union(rect(100, 20, 220, 80), rect(100, 120, 220, 182)),
-    cities: [[160, 79, 1], [205, 121, 1]],
+    cities: [[160, 79, 1], [205, 121, 1], [101, 50, 2, 'bonus'], [219, 150, 2, 'bonus']],
     spawns: [[44, 100, 16], [282, 100, 14], [58, 40, 13]],
     zones: [[160, 100]],
   },
@@ -130,7 +132,7 @@ const levels = [
     hint: 'Symmetric epicenters arrive together. The odd one out needs the delay.',
     quakes: ['medium', 'medium', 'small'],
     land: ellipse(160, 100, 26, 22, 3),
-    cities: [[160, 79, 2]],
+    cities: [[160, 79, 2], [160, 121, 2, 'bonus']],
     spawns: [[52, 46, 14], [268, 46, 14], [56, 156, 14], [264, 156, 14]],
     zones: [[160, 160]],
   },
@@ -141,7 +143,7 @@ const levels = [
     quakes: ['medium', 'medium', 'small'],
     inventory: ['small', 'small', 'small', 'small', 'small', 'small', 'small'],
     land: minus(ellipse(170, 100, 72, 62, 0.5), ellipse(197, 100, 60, 48, 0.5)),
-    cities: [[136, 100, 2]],
+    cities: [[136, 100, 2], [99, 100, 2, 'bonus']],
     spawns: [[282, 58, 14], [282, 146, 14], [40, 100, 16]],
     zones: [[270, 100]],
   },
@@ -152,7 +154,7 @@ const levels = [
     quakes: ['large', 'medium', 'small'],
     inventory: ['medium', 'medium', 'medium', 'medium', 'small'],
     land: minus(union(rect(24, 110, 232, 200), rect(0, 24, 90, 200)), rect(110, 128, 240, 156)),
-    cities: [[109, 142, 3]],
+    cities: [[109, 142, 3], [150, 111, 2, 'bonus']],
     spawns: [[282, 142, 14], [200, 58, 16], [128, 46, 14]],
     zones: [[260, 100]],
   },
@@ -162,7 +164,7 @@ const levels = [
     hint: 'Two cities on two islands. One quake has to be timed for both.',
     quakes: ['medium', 'medium', 'medium'],
     land: union(ellipse(72, 58, 22, 16, 1), ellipse(160, 145, 34, 22, 2), ellipse(248, 58, 22, 16, 3)),
-    cities: [[72, 74, 1], [160, 123, 2]],
+    cities: [[72, 74, 1], [160, 123, 2], [248, 74, 2, 'bonus'], [160, 166, 2, 'bonus']],
     spawns: [[160, 38, 16], [40, 150, 14], [284, 150, 14]],
     zones: [[160, 84]],
   },
@@ -173,7 +175,7 @@ const levels = [
     quakes: ['large', 'medium', 'small'],
     inventory: ['medium', 'medium', 'medium', 'small', 'small', 'small', 'small'],
     land: ring(160, 100, 45, 68, 0, 0.35),
-    cities: [[114, 100, 3]],
+    cities: [[114, 100, 3], [160, 33, 2, 'bonus']],
     spawns: [[42, 40, 14], [42, 160, 14], [284, 100, 14]],
     zones: [[160, 100]],
   },
@@ -218,7 +220,7 @@ function render(level) {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (level.land(x + 0.5, y + 0.5)) paint(x, y, LAND);
   for (const [x, y, r] of level.spawns) disc(x, y, r, SPAWN);
   for (const [x, y] of level.zones) disc(x, y, 2, ZONE);
-  for (const [x, y, lvl] of level.cities) disc(x, y, 2.5, CITY[lvl]);
+  for (const [x, y, lvl, bonus] of level.cities) disc(x, y, 2.5, bonus ? BONUS : CITY[lvl]);
   return px;
 }
 

@@ -8,6 +8,7 @@ import type { SpawnArea } from './types.ts';
 //   #FF0000 red      city, level 1   (draw on the coast; counts as land)
 //   #FF8000 orange   city, level 2
 //   #FF00FF magenta  city, level 3
+//   #00FFFF cyan     bonus city (harder; optional), level 2
 //   #00FF00 green    epicenter: a filled disc; its size sets the radius (water)
 //   #FFFF00 yellow   golden chaos ring: a small dot (water)
 //
@@ -15,17 +16,18 @@ import type { SpawnArea } from './types.ts';
 
 export interface MapMarkers {
   land: Uint8Array;
-  cities: { x: number; y: number; level: number }[];
+  cities: { x: number; y: number; level: number; bonus: boolean }[];
   spawns: SpawnArea[];
   zones: { x: number; y: number }[];
 }
 
-type Marker = 'city1' | 'city2' | 'city3' | 'spawn' | 'zone';
+type Marker = 'city1' | 'city2' | 'city3' | 'bonus2' | 'spawn' | 'zone';
 
 const LEGEND: { marker: Marker; rgb: [number, number, number] }[] = [
   { marker: 'city1', rgb: [255, 0, 0] },
   { marker: 'city2', rgb: [255, 128, 0] },
   { marker: 'city3', rgb: [255, 0, 255] },
+  { marker: 'bonus2', rgb: [0, 255, 255] },
   { marker: 'spawn', rgb: [0, 255, 0] },
   { marker: 'zone', rgb: [255, 255, 0] },
 ];
@@ -52,7 +54,7 @@ function classify(data: Uint8ClampedArray | Uint8Array, n: number): Uint8Array {
 
 export function parseMapImage(data: Uint8ClampedArray | Uint8Array, imgW: number, imgH: number): MapMarkers {
   const cls = classify(data, imgW * imgH);
-  const isLand = (c: number) => c === 1 || (c >= 2 && LEGEND[c - 2].marker.startsWith('city'));
+  const isLand = (c: number) => c === 1 || (c >= 2 && /^(city|bonus)/.test(LEGEND[c - 2].marker));
 
   // Land by majority vote over the pixels covering each grid cell.
   const land = new Uint8Array(GRID_W * GRID_H);
@@ -88,8 +90,9 @@ export function parseMapImage(data: Uint8ClampedArray | Uint8Array, imgW: number
     } else if (marker === 'zone') {
       out.zones.push(c);
     } else {
-      const level = Number(marker.slice(4));
-      out.cities.push({ ...snapToLand(land, Math.round(c.x), Math.round(c.y)), level });
+      const bonus = marker.startsWith('bonus');
+      const level = Number(marker.slice(bonus ? 5 : 4));
+      out.cities.push({ ...snapToLand(land, Math.round(c.x), Math.round(c.y)), level, bonus });
     }
   }
   return out;
