@@ -1981,3 +1981,31 @@ body:not(.playing) .labels {
   cursor: pointer;
   font-weight: 600;
 }
+
+.skill-btn {
+  position: relative;
+}
+
+.skill-btn .badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warm);
+  color: #3a2a00;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--panel);
+  animation: badge-pop 0.4s var(--ease-back);
+}
+
+@keyframes badge-pop {
+  from {
+    transform: scale(0.3);
+  }
+}

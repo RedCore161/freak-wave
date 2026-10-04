@@ -15,7 +15,7 @@ import { Sonifier } from '../audio/Sonifier.ts';
 import type { ResultCity, Ui } from '../ui/Ui.ts';
 import { loadSave, writeSave } from './save.ts';
 import { loadSettings, writeSettings, type Settings } from './settings.ts';
-import { AFTERSHOCK_DELAY, AFTERSHOCK_STRENGTH, canBuy, loadout, SKILL_BY_ID, zoneBaseMult, type Loadout } from './skills.ts';
+import { AFTERSHOCK_DELAY, AFTERSHOCK_STRENGTH, canBuy, loadout, SKILLS, SKILL_BY_ID, zoneBaseMult, type Loadout } from './skills.ts';
 import { CONFIG } from '../config.ts';
 import { applyOverrides } from '../level/overrides.ts';
 
@@ -191,12 +191,18 @@ export class Game {
     this.phase = 'menu';
     this.run = null;
     this.ui.setPlayVisible(false);
+    this.updateSkillBadge();
     this.ui.showMenu(this.save.chaos, this.save.bestLevel, this.owned.size, {
       start: () => (this.settings.tutorialSeen ? void this.openLevelSelect() : this.openTutorial(() => this.startRun(0))),
       tutorial: () => this.openTutorial(() => this.showMenu()),
       settings: () => this.openSettings(() => this.showMenu()),
       skills: () => this.openSkills(() => this.showMenu()),
     });
+  }
+
+  /** Skills buyable right now (for the Skill tree badge). */
+  private updateSkillBadge(): void {
+    this.ui.skillsAffordable = SKILLS.filter((s) => canBuy(s.id, this.owned, this.save.chaos)).length;
   }
 
   private openSkills(back: () => void): void {
@@ -726,6 +732,7 @@ export class Game {
     else this.audio.lose();
 
     if (!success && attemptsLeft <= 0) {
+      this.updateSkillBadge();
       this.phase = 'gameover';
       this.refreshHud();
       this.ui.showGameOver(
@@ -736,11 +743,19 @@ export class Game {
     }
     this.phase = 'result';
     this.refreshHud();
-    const show = () =>
+    const show = () => {
+      this.updateSkillBadge();
       this.ui.showResult(
         { success, cities, lines, chaos, total: this.save.chaos, attemptsLeft },
         {
           next: success ? () => void this.loadLevel() : null,
+          replay: success
+            ? () => {
+                // Same sea again; the run continues from here afterwards.
+                run.index = level.index;
+                void this.loadLevel();
+              }
+            : null,
           retry: success
             ? null
             : () => {
@@ -753,6 +768,7 @@ export class Game {
           menu: () => this.showMenu(),
         },
       );
+    };
     // Let the last splash settle before the panel slides in.
     window.setTimeout(show, success ? 500 : 250);
   }

@@ -515,7 +515,7 @@ export class Ui {
         'div',
         { class: 'panel-actions' },
         h('button', { class: 'btn ghost', onclick: a.tutorial }, 'How to play'),
-        h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
+        this.skillButton(a.skills),
         h('button', { class: 'btn primary', onclick: a.start }, 'Play'),
       ),
       h(
@@ -631,6 +631,17 @@ export class Ui {
     );
   }
 
+  /** Skills the player can buy right now, shown as a badge on Skill tree buttons. */
+  skillsAffordable = 0;
+
+  private skillButton(onclick: () => void): HTMLElement {
+    const btn = h('button', { class: 'btn ghost skill-btn', onclick }, 'Skill tree');
+    if (this.skillsAffordable > 0) {
+      btn.append(h('span', { class: 'badge', title: `${this.skillsAffordable} skills you can buy now` }, String(this.skillsAffordable)));
+    }
+    return btn;
+  }
+
   showLoading(text: string): void {
     this.showPanel('loading-panel', h('div', { class: 'loading' }, h('div', { class: 'spinner' }), text));
   }
@@ -683,7 +694,7 @@ export class Ui {
 
   showResult(
     d: { success: boolean; cities: ResultCity[]; lines: Line[]; chaos: number; total: number; attemptsLeft: number },
-    a: { next: (() => void) | null; retry: (() => void) | null; skills: () => void; menu: () => void },
+    a: { next: (() => void) | null; replay: (() => void) | null; retry: (() => void) | null; skills: () => void; menu: () => void },
   ): void {
     this.showPanel(
       d.success ? 'result win' : 'result',
@@ -701,8 +712,9 @@ export class Ui {
         'div',
         { class: 'panel-actions' },
         h('button', { class: 'btn ghost', onclick: a.menu }, 'Give up'),
-        h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
+        this.skillButton(a.skills),
         a.retry && h('button', { class: 'btn primary', onclick: a.retry }, 'Try again'),
+        a.replay && h('button', { class: 'btn ghost', onclick: a.replay, title: 'Play this sea again (farm chaos)' }, 'Replay'),
         a.next && h('button', { class: 'btn primary', onclick: a.next }, 'Next sea'),
       ),
     );
@@ -722,7 +734,7 @@ export class Ui {
         'div',
         { class: 'panel-actions' },
         h('button', { class: 'btn ghost', onclick: a.menu }, 'Menu'),
-        h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
+        this.skillButton(a.skills),
         h('button', { class: 'btn primary', onclick: a.again }, 'New run'),
       ),
     );
