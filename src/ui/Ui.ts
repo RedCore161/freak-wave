@@ -1,10 +1,10 @@
 import { QUAKE_TYPES, type QuakeKind } from '../sim/quakes.ts';
-import { rampCss } from '../render/palette.ts';
-import { canBuy, SKILLS, type SkillDef, type SkillId } from '../game/skills.ts';
+import { BRANCHES, canBuy, SKILLS, SKILL_BY_ID } from '../game/skills.ts';
+import { iconEl, iconSvg, type IconId } from './icons.ts';
 
 type Child = Node | string | null | undefined | false;
 
-function h<K extends keyof HTMLElementTagNameMap>(
+export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   props: Partial<Record<string, string | ((e: Event) => void)>> = {},
   ...children: Child[]
@@ -20,36 +20,63 @@ function h<K extends keyof HTMLElementTagNameMap>(
 
 const svgNs = 'http://www.w3.org/2000/svg';
 
+const QUAKE_ICON: Record<QuakeKind, IconId> = { small: 'tremor', medium: 'quake', large: 'mega', rift: 'rift', pulse: 'pulse' };
+
 export interface TrayData {
   kinds: { kind: QuakeKind; left: number; total: number }[];
   selected: QuakeKind | null;
   canStart: boolean;
   canClear: boolean;
+  oracles: number;
 }
 
-export interface TargetLabel {
+export interface CityLabel {
   x: number;
   y: number;
-  required: number;
-  best: number;
+  name: string;
+  level: number;
+  wall: number;
+  hp: number;
+  damage: number;
+  ruined: boolean;
+  /** Shoreline height / wall, for the live gauge. */
+  water: number;
+  prediction: number | null;
+}
+
+export interface ZoneLabel {
+  x: number;
+  y: number;
+  threshold: number;
+  mult: number;
   hit: boolean;
-  arrivals: { color: string; t: number }[];
 }
 
 export interface HudData {
   level: number;
   name: string;
-  lives: number;
-  maxLives: number;
+  attempt: number;
+  attempts: number;
   chaos: number;
   speed: number;
   running: boolean;
+  muted: boolean;
 }
 
-interface ResultTarget {
-  required: number;
-  best: number;
-  hit: boolean;
+export interface TimelineData {
+  duration: number;
+  maxFuse: number;
+  step: number;
+  quakes: { id: number; kind: QuakeKind; delay: number; selected: boolean }[];
+  cities: { name: string; ruined: boolean; arrivals: { id: number; kind: QuakeKind; t: number }[] }[];
+}
+
+export interface ResultCity {
+  name: string;
+  level: number;
+  ruined: boolean;
+  damage: number;
+  hp: number;
 }
 
 interface Line {
@@ -59,41 +86,64 @@ interface Line {
 
 export class Ui {
   onSpeed: () => void = () => {};
+  onMute: () => void = () => {};
   onSelectKind: (kind: QuakeKind) => void = () => {};
   onStart: () => void = () => {};
   onClear: () => void = () => {};
-  onDelay: (delta: number) => void = () => {};
+  onOracle: () => void = () => {};
+  onDelay: (steps: number) => void = () => {};
+  onSetDelay: (id: number, delay: number) => void = () => {};
+  onSelectQuake: (id: number) => void = () => {};
+  onRotate: () => void = () => {};
   onRemove: () => void = () => {};
+  /** Any button press, for the click sound. */
+  onTap: () => void = () => {};
 
-  private root: HTMLElement;
   private hud = h('header', { class: 'hud' });
   private hudLevel = h('div', { class: 'hud-level' });
-  private hudLives = h('div', { class: 'hud-lives', title: 'Lives' });
+  private hudAttempts = h('div', { class: 'hud-attempts', title: 'Attempts left' });
   private hudChaos = h('div', { class: 'hud-chaos', title: 'Chaos' });
   private speedBtn = h('button', { class: 'btn small ghost', onclick: () => this.onSpeed() });
+  private muteBtn = h('button', { class: 'btn small ghost icon-btn', onclick: () => this.onMute(), title: 'Sound' });
   private progress = h('div', { class: 'progress' }, h('div', { class: 'progress-fill' }));
   private hint = h('div', { class: 'hint' });
+  private dock = h('div', { class: 'dock' });
+  private timeline = h('div', { class: 'timeline' });
   private tray = h('footer', { class: 'tray' });
   private labels = h('div', { class: 'labels' });
-  private labelEls: HTMLElement[] = [];
+  private cityEls: HTMLElement[] = [];
+  private zoneEls: HTMLElement[] = [];
+  private banners = h('div', { class: 'banners' });
   private quakePanel = h('div', { class: 'quake-panel', hidden: '' });
   private overlay = h('div', { class: 'overlay', hidden: '' });
   private trayKey = '';
+  private tlKey = '';
+  private tlData: TimelineData | null = null;
+  private tlDrag: { id: number; pointerId: number } | null = null;
+  private skillFocus: string | null = null;
+  private skillScroll = { left: 0, top: 0 };
+  private hideTimer = 0;
 
   constructor(root: HTMLElement) {
-    this.root = root;
     this.hud.append(
       this.hudLevel,
-      h('div', { class: 'hud-right' }, this.hudLives, this.hudChaos, this.speedBtn),
+      h('div', { class: 'hud-right' }, this.hudAttempts, this.hudChaos, this.speedBtn, this.muteBtn),
       this.progress,
     );
+    this.dock.append(this.hint, this.timeline, this.tray);
     this.buildQuakePanel();
-    root.append(this.labels, this.hud, this.hint, this.tray, this.quakePanel, this.overlay);
+    root.append(this.labels, this.banners, this.hud, this.dock, this.quakePanel, this.overlay);
+    root.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('button')) this.onTap();
+    });
+    this.timeline.addEventListener('pointermove', (e) => this.tlMove(e));
+    this.timeline.addEventListener('pointerup', (e) => this.tlUp(e));
+    this.timeline.addEventListener('pointercancel', (e) => this.tlUp(e));
     this.setPlayVisible(false);
   }
 
   setPlayVisible(visible: boolean): void {
-    for (const el of [this.hud, this.hint, this.tray, this.labels]) el.hidden = !visible;
+    document.body.classList.toggle('playing', visible);
     if (!visible) this.quakePanel.hidden = true;
   }
 
@@ -101,13 +151,15 @@ export class Ui {
 
   setHud(d: HudData): void {
     this.hudLevel.replaceChildren(h('span', { class: 'hud-num' }, `Sea ${d.level}`), h('span', { class: 'hud-name' }, d.name));
-    this.hudLives.replaceChildren(
-      ...Array.from({ length: d.maxLives }, (_, k) => h('span', { class: k < d.lives ? 'life' : 'life lost' })),
-    );
+    const left = d.attempts - d.attempt + 1;
+    this.hudAttempts.replaceChildren(...Array.from({ length: d.attempts }, (_, k) => h('span', { class: k < left ? 'life' : 'life lost' })));
     this.hudChaos.textContent = `${d.chaos} chaos`;
     this.speedBtn.textContent = `${d.speed}×`;
     this.speedBtn.hidden = !d.running;
     this.progress.hidden = !d.running;
+    this.muteBtn.innerHTML = d.muted
+      ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9v6h4l5 4V5L8 9zM17 9l5 6M22 9l-5 6"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/></svg>';
   }
 
   setProgress(f: number): void {
@@ -117,179 +169,360 @@ export class Ui {
   setHint(text: string, warn = false): void {
     this.hint.textContent = text;
     this.hint.classList.toggle('warn', warn);
-    this.hint.style.visibility = text ? 'visible' : 'hidden';
+    this.hint.classList.toggle('empty', !text);
+    if (warn) {
+      this.hint.classList.remove('shake');
+      void this.hint.offsetWidth;
+      this.hint.classList.add('shake');
+    }
   }
+
+  /** Big transient text in the middle of the screen. */
+  banner(text: string, tone: 'hot' | 'cool' | 'warm' = 'warm', sub?: string): void {
+    const el = h('div', { class: `banner ${tone}` }, h('b', {}, text), sub ? h('span', {}, sub) : null);
+    this.banners.append(el);
+    setTimeout(() => el.remove(), 1700);
+  }
+
+  /** Small floating number above a point on screen. */
+  popup(x: number, y: number, text: string, tone: 'hit' | 'combo' = 'hit'): void {
+    const el = h('div', { class: `popup ${tone}`, style: `left: ${x}px; top: ${y}px` }, text);
+    this.labels.append(el);
+    setTimeout(() => el.remove(), 1100);
+  }
+
+  // ---------------------------------------------------------------- tray
 
   setTray(d: TrayData | null): void {
     const key = JSON.stringify(d);
     if (key === this.trayKey) return;
     this.trayKey = key;
+    this.tray.classList.toggle('empty', !d);
     if (!d) {
       this.tray.replaceChildren();
-      this.tray.classList.add('empty');
       return;
     }
-    this.tray.classList.remove('empty');
     const cards = d.kinds.map((k) => {
       const type = QUAKE_TYPES[k.kind];
-      const card = h(
+      return h(
         'button',
         {
           class: `quake-card${d.selected === k.kind ? ' selected' : ''}${k.left === 0 ? ' spent' : ''}`,
           style: `--qc: ${type.color}`,
+          title: type.blurb,
           onclick: () => this.onSelectKind(k.kind),
         },
-        h('span', { class: 'gem' }),
+        iconEl(QUAKE_ICON[k.kind], 18),
         h('span', { class: 'quake-name' }, type.name),
         h('span', { class: 'quake-count' }, `${k.left}/${k.total}`),
       );
-      return card;
     });
+    const actions: HTMLElement[] = [];
+    if (d.oracles > 0) {
+      actions.push(h('button', { class: 'btn ghost oracle', onclick: () => this.onOracle(), title: 'Oracle: preview damage' }, iconEl('eye', 16), `${d.oracles}`));
+    }
     const clear = h('button', { class: 'btn ghost', onclick: () => this.onClear() }, 'Clear');
     if (!d.canClear) clear.setAttribute('disabled', '');
     const start = h('button', { class: 'btn primary', onclick: () => this.onStart() }, 'Unleash');
     if (!d.canStart) start.setAttribute('disabled', '');
-    this.tray.replaceChildren(h('div', { class: 'cards' }, ...cards), h('div', { class: 'actions' }, clear, start));
+    actions.push(clear, start);
+    this.tray.replaceChildren(h('div', { class: 'cards' }, ...cards), h('div', { class: 'actions' }, ...actions));
   }
 
-  setTargetLabels(list: TargetLabel[]): void {
-    while (this.labelEls.length < list.length) {
-      const el = h('div', { class: 'target-label' });
-      this.labels.append(el);
-      this.labelEls.push(el);
+  // ---------------------------------------------------------------- timeline
+
+  /** Fire times (draggable) and estimated crest arrivals per city. */
+  setTimeline(d: TimelineData | null, playhead: number | null = null): void {
+    this.tlData = d;
+    this.timeline.classList.toggle('empty', !d);
+    if (!d) {
+      if (this.tlKey) this.timeline.replaceChildren();
+      this.tlKey = '';
+      return;
     }
-    while (this.labelEls.length > list.length) this.labelEls.pop()!.remove();
-    list.forEach((t, k) => {
-      const el = this.labelEls[k];
-      el.style.transform = `translate(${t.x}px, ${t.y}px)`;
-      const key = `${t.required}|${t.best.toFixed(1)}|${t.hit}|${t.arrivals.map((a) => a.color + a.t.toFixed(1)).join()}`;
+    const key = JSON.stringify(d);
+    if (key !== this.tlKey) {
+      this.tlKey = key;
+      this.renderTimeline(d);
+    }
+    const head = this.timeline.querySelector<HTMLElement>('.tl-playhead');
+    if (head) {
+      head.hidden = playhead === null;
+      if (playhead !== null) head.style.left = `${Math.min(100, (playhead / d.duration) * 100)}%`;
+    }
+  }
+
+  private renderTimeline(d: TimelineData): void {
+    const pct = (t: number) => `${Math.max(0, Math.min(100, (t / d.duration) * 100))}%`;
+    const ticks: HTMLElement[] = [];
+    for (let s = 0; s <= d.duration; s++) {
+      ticks.push(h('span', { class: `tl-tick${s % 2 ? ' minor' : ''}`, style: `left: ${pct(s)}` }, s % 2 ? '' : `${s}s`));
+    }
+    const fireTrack = h(
+      'div',
+      { class: 'tl-track fire' },
+      h('div', { class: 'tl-fuse', style: `width: ${pct(d.maxFuse)}` }),
+      ...d.quakes.map((q) => {
+        const gem = h('button', {
+          class: `tl-gem${q.selected ? ' selected' : ''}`,
+          style: `left: ${pct(q.delay)}; --qc: ${QUAKE_TYPES[q.kind].color}`,
+          title: `${QUAKE_TYPES[q.kind].name} fires at ${q.delay.toFixed(2)} s`,
+        });
+        gem.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          this.tlDrag = { id: q.id, pointerId: e.pointerId };
+          this.timeline.setPointerCapture(e.pointerId);
+          this.onSelectQuake(q.id);
+        });
+        return gem;
+      }),
+    );
+    const cityRows = d.cities.map((c) =>
+      h(
+        'div',
+        { class: `tl-row${c.ruined ? ' ruined' : ''}` },
+        h('span', { class: 'tl-label' }, iconEl('city', 13), h('span', {}, c.name)),
+        h(
+          'div',
+          { class: 'tl-track thin' },
+          ...c.arrivals.map((a) =>
+            h('span', {
+              class: `tl-arrival${d.quakes.find((q) => q.id === a.id)?.selected ? ' selected' : ''}`,
+              style: `left: ${pct(a.t)}; --qc: ${QUAKE_TYPES[a.kind].color}`,
+            }),
+          ),
+        ),
+      ),
+    );
+    this.timeline.replaceChildren(
+      h('div', { class: 'tl-row' }, h('span', { class: 'tl-label' }, iconEl('fuse', 13), h('span', {}, 'Fire')), fireTrack),
+      ...cityRows,
+      h(
+        'div',
+        { class: 'tl-row axis' },
+        h('span', { class: 'tl-label' }),
+        h('div', { class: 'tl-axis' }, ...ticks, h('div', { class: 'tl-playhead', hidden: '' })),
+      ),
+    );
+  }
+
+  private tlMove(e: PointerEvent): void {
+    const d = this.tlData;
+    if (!this.tlDrag || this.tlDrag.pointerId !== e.pointerId || !d) return;
+    const track = this.timeline.querySelector<HTMLElement>('.tl-track.fire');
+    if (!track) return;
+    const r = track.getBoundingClientRect();
+    const t = ((e.clientX - r.left) / r.width) * d.duration;
+    const snapped = Math.round(Math.max(0, Math.min(d.maxFuse, t)) / d.step) * d.step;
+    this.onSetDelay(this.tlDrag.id, snapped);
+  }
+
+  private tlUp(e: PointerEvent): void {
+    if (this.tlDrag?.pointerId === e.pointerId) this.tlDrag = null;
+  }
+
+  // ---------------------------------------------------------------- labels
+
+  setCityLabels(list: CityLabel[]): void {
+    while (this.cityEls.length < list.length) {
+      const el = h('div', { class: 'city-label' });
+      this.labels.append(el);
+      this.cityEls.push(el);
+    }
+    while (this.cityEls.length > list.length) this.cityEls.pop()!.remove();
+    list.forEach((c, k) => {
+      const el = this.cityEls[k];
+      el.style.transform = `translate(${c.x}px, ${c.y}px)`;
+      const water = Math.max(0, Math.min(1.3, c.water));
+      const key = `${c.name}|${c.wall}|${c.damage.toFixed(2)}|${c.ruined}|${water.toFixed(2)}|${c.prediction}`;
       if (el.dataset.key === key) return;
       el.dataset.key = key;
-      el.classList.toggle('hit', t.hit);
-      const best = t.best > 0.05 ? h('span', { class: 'best', style: `color: ${rampCss(Math.max(4, t.best))}` }, `${t.best.toFixed(1)}`) : null;
-      const arrivals = t.arrivals.length
-        ? h(
+      el.classList.toggle('ruined', c.ruined);
+      const frac = Math.min(1, c.damage / c.hp);
+      const pred =
+        c.prediction !== null
+          ? h('div', { class: `prediction${c.prediction >= c.hp ? ' ok' : ''}` }, iconEl('eye', 12), ` ${c.prediction.toFixed(1)} / ${c.hp.toFixed(1)}`)
+          : null;
+      el.replaceChildren(
+        h(
+          'div',
+          { class: 'city-card' },
+          h('div', { class: 'city-top' }, h('span', { class: 'city-lvl' }, `L${c.level}`), h('span', { class: 'city-name' }, c.ruined ? 'RUINED' : c.name)),
+          h(
             'div',
-            { class: 'arrivals' },
-            ...t.arrivals.map((a) => h('span', { class: 'arrival', style: `--qc: ${a.color}` }, `${a.t.toFixed(1)}s`)),
-          )
-        : null;
-      const need = h('div', { class: 'need' }, t.hit ? 'HIT ' : '', best, best ? ' / ' : '', `${t.required.toFixed(1)} m`);
-      if (arrivals) el.replaceChildren(need, arrivals);
-      else el.replaceChildren(need);
+            { class: 'city-stats' },
+            h('span', { class: 'wall' }, iconEl('wall', 12), ` ${c.wall.toFixed(1)} m`),
+            h('span', { class: 'gauge', title: 'Water vs wall' }, h('i', { style: `height: ${(water / 1.3) * 100}%`, class: water >= 1 ? 'over' : '' }), h('b', {})),
+          ),
+          h('div', { class: 'hpbar' }, h('i', { style: `width: ${(1 - frac) * 100}%` })),
+          pred,
+        ),
+      );
+    });
+  }
+
+  setZoneLabels(list: ZoneLabel[]): void {
+    while (this.zoneEls.length < list.length) {
+      const el = h('div', { class: 'zone-label' });
+      this.labels.append(el);
+      this.zoneEls.push(el);
+    }
+    while (this.zoneEls.length > list.length) this.zoneEls.pop()!.remove();
+    list.forEach((z, k) => {
+      const el = this.zoneEls[k];
+      el.style.transform = `translate(${z.x}px, ${z.y}px)`;
+      const key = `${z.threshold}|${z.mult}|${z.hit}`;
+      if (el.dataset.key === key) return;
+      el.dataset.key = key;
+      el.classList.toggle('hit', z.hit);
+      el.replaceChildren(h('div', {}, iconEl('amp', 12), ` ×${z.mult.toFixed(1)} · ${z.threshold.toFixed(1)} m`));
     });
   }
 
   private panelDelay = h('span', { class: 'delay' });
-  private panelFuse = h('div', { class: 'fuse' });
+  private panelRotate = h('button', { class: 'btn small ghost icon-btn', title: 'Rotate', onclick: () => this.onRotate() });
 
   private buildQuakePanel(): void {
-    this.panelFuse.append(
-      h('button', { class: 'btn small ghost', onclick: () => this.onDelay(-0.5) }, '−'),
+    this.panelRotate.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/></svg>';
+    this.quakePanel.append(
+      h('button', { class: 'btn small ghost', onclick: () => this.onDelay(-1) }, '−'),
       this.panelDelay,
-      h('button', { class: 'btn small ghost', onclick: () => this.onDelay(0.5) }, '+'),
+      h('button', { class: 'btn small ghost', onclick: () => this.onDelay(1) }, '+'),
+      this.panelRotate,
+      h('button', { class: 'btn small danger', onclick: () => this.onRemove() }, 'Remove'),
     );
-    this.quakePanel.append(this.panelFuse, h('button', { class: 'btn small danger', onclick: () => this.onRemove() }, 'Remove'));
     this.quakePanel.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
 
-  setQuakePanel(d: { x: number; y: number; kind: QuakeKind; delay: number; fuse: boolean } | null): void {
+  setQuakePanel(d: { x: number; y: number; delay: number; rotatable: boolean } | null): void {
     this.quakePanel.hidden = !d;
     if (!d) return;
-    this.quakePanel.style.transform = `translate(${d.x}px, ${d.y + 22}px)`;
-    this.panelFuse.hidden = !d.fuse;
-    this.panelDelay.textContent = `fuse ${d.delay.toFixed(1)}s`;
+    // Keep the panel on screen; it is centred on x via CSS translate.
+    const half = this.quakePanel.offsetWidth / 2 + 8;
+    const x = Math.max(half, Math.min(window.innerWidth - half, d.x));
+    this.quakePanel.style.transform = `translate(${x}px, ${d.y + 24}px)`;
+    this.panelRotate.hidden = !d.rotatable;
+    this.panelDelay.textContent = `fires ${d.delay.toFixed(2)}s`;
   }
 
   // ---------------------------------------------------------------- overlays
 
   hideOverlay(): void {
-    this.overlay.hidden = true;
-    this.overlay.replaceChildren();
+    if (this.overlay.hidden) return;
+    this.overlay.classList.add('leaving');
+    clearTimeout(this.hideTimer);
+    this.hideTimer = window.setTimeout(() => {
+      this.overlay.hidden = true;
+      this.overlay.classList.remove('leaving');
+      this.overlay.replaceChildren();
+    }, 220);
   }
 
-  private showPanel(...children: Child[]): void {
+  private showPanel(cls: string, ...children: Child[]): HTMLElement {
+    clearTimeout(this.hideTimer);
+    this.overlay.classList.remove('leaving');
     this.overlay.hidden = false;
-    this.overlay.replaceChildren(h('div', { class: 'panel' }, ...children));
+    const panel = h('div', { class: `panel ${cls}` }, ...children);
+    this.overlay.replaceChildren(panel);
+    return panel;
   }
 
-  showMenu(chaos: number, bestLevel: number, a: { start: () => void; skills: () => void }): void {
-    this.overlay.hidden = false;
-    this.overlay.replaceChildren(
+  showMenu(chaos: number, bestLevel: number, skills: number, a: { start: () => void; skills: () => void }): void {
+    this.showPanel(
+      'title-panel',
+      h('h1', { class: 'logo' }, 'Freak', h('span', {}, 'Wave')),
+      h('p', { class: 'tagline' }, 'Time your earthquakes. Stack the waves. Drown the coast.'),
       h(
         'div',
-        { class: 'panel title-panel' },
-        h('h1', { class: 'logo' }, 'Freak', h('span', {}, 'Wave')),
-        h('p', { class: 'tagline' }, 'Place earthquakes. Bend the sea. Make the waves meet.'),
-        h(
-          'div',
-          { class: 'stats' },
-          h('div', {}, h('b', {}, String(chaos)), h('span', {}, 'chaos')),
-          h('div', {}, h('b', {}, String(bestLevel)), h('span', {}, 'best run')),
-        ),
-        h(
-          'div',
-          { class: 'panel-actions' },
-          h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
-          h('button', { class: 'btn primary', onclick: a.start }, 'Start run'),
-        ),
-        h(
-          'ul',
-          { class: 'howto' },
-          h('li', {}, 'Each quake sends out a train of waves.'),
-          h('li', {}, 'Waves that arrive together stack up. Islands reflect them.'),
-          h('li', {}, 'Push a crest through every hoop before the sea calms.'),
-        ),
+        { class: 'stats' },
+        h('div', {}, h('b', {}, String(chaos)), h('span', {}, 'chaos')),
+        h('div', {}, h('b', {}, String(bestLevel)), h('span', {}, 'best run')),
+        h('div', {}, h('b', {}, `${skills}/${SKILLS.length}`), h('span', {}, 'skills')),
+      ),
+      h(
+        'div',
+        { class: 'panel-actions' },
+        h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
+        h('button', { class: 'btn primary', onclick: a.start }, 'Start run'),
+      ),
+      h(
+        'ul',
+        { class: 'howto' },
+        h('li', {}, 'Quakes can only start inside the green epicenters.'),
+        h('li', {}, 'Drag quakes along the timeline to delay them, so their crests reach a city together.'),
+        h('li', {}, 'Every crest that tops a sea wall damages the city. Back-to-back crests combo.'),
+        h('li', {}, 'Ruin every city within 3 attempts. Golden rings multiply your chaos.'),
       ),
     );
   }
 
   showLoading(text: string): void {
-    this.showPanel(h('div', { class: 'loading' }, h('div', { class: 'spinner' }), text));
+    this.showPanel('loading-panel', h('div', { class: 'loading' }, h('div', { class: 'spinner' }), text));
   }
 
   showError(message: string, back: () => void): void {
     this.showPanel(
+      '',
       h('h2', {}, 'Something broke'),
       h('p', { class: 'muted' }, message),
       h('div', { class: 'panel-actions' }, h('button', { class: 'btn primary', onclick: back }, 'Back')),
     );
   }
 
-  private targetRows(targets: ResultTarget[]): HTMLElement {
+  private chaosLines(lines: Line[], total: number, gained: number): HTMLElement {
+    const totalEl = h('b', {}, String(total - gained));
+    const box = h(
+      'div',
+      { class: 'chaos-lines' },
+      ...lines.map((l, i) =>
+        h('div', { class: 'chaos-line', style: `animation-delay: ${0.15 + i * 0.12}s` }, h('span', {}, l.label), h('b', {}, l.value)),
+      ),
+      h('div', { class: 'chaos-line total', style: `animation-delay: ${0.15 + lines.length * 0.12}s` }, h('span', {}, 'Chaos banked'), totalEl),
+    );
+    // Count the total up once the lines have appeared.
+    const start = performance.now() + 250 + lines.length * 120;
+    const from = total - gained;
+    const tick = (now: number) => {
+      const k = Math.max(0, Math.min(1, (now - start) / 700));
+      totalEl.textContent = String(Math.round(from + gained * (1 - (1 - k) ** 3)));
+      if (k < 1 && totalEl.isConnected) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return box;
+  }
+
+  private cityRows(cities: ResultCity[]): HTMLElement {
     return h(
       'div',
       { class: 'result-targets' },
-      ...targets.map((t, k) =>
+      ...cities.map((c, i) =>
         h(
           'div',
-          { class: `result-target${t.hit ? ' hit' : ''}` },
-          h('span', {}, targets.length > 1 ? `Hoop ${String.fromCharCode(65 + k)}` : 'Hoop'),
-          h('span', { style: `color: ${rampCss(Math.max(4, t.best))}` }, `${t.best.toFixed(1)} m`),
-          h('span', { class: 'muted' }, `of ${t.required.toFixed(1)} m`),
+          { class: `result-target${c.ruined ? ' hit' : ''}`, style: `animation-delay: ${i * 0.08}s` },
+          h('span', {}, `L${c.level} ${c.name}`),
+          h('span', {}, c.ruined ? 'Ruined' : `${Math.round(Math.min(1, c.damage / c.hp) * 100)}%`),
         ),
       ),
     );
   }
 
-  private chaosLines(lines: Line[], total: number): HTMLElement {
-    return h(
-      'div',
-      { class: 'chaos-lines' },
-      ...lines.map((l) => h('div', { class: 'chaos-line' }, h('span', {}, l.label), h('b', {}, l.value))),
-      h('div', { class: 'chaos-line total' }, h('span', {}, 'Chaos banked'), h('b', {}, String(total))),
-    );
-  }
-
   showResult(
-    d: { success: boolean; targets: ResultTarget[]; lines: Line[]; chaos: number; total: number; lives: number },
+    d: { success: boolean; cities: ResultCity[]; lines: Line[]; chaos: number; total: number; attemptsLeft: number },
     a: { next: (() => void) | null; retry: (() => void) | null; skills: () => void; menu: () => void },
   ): void {
     this.showPanel(
-      h('h2', { class: d.success ? 'win' : 'lose' }, d.success ? 'Freak wave!' : 'The sea held'),
-      h('p', { class: 'muted' }, d.success ? 'Every hoop was breached.' : `You lose a life. ${d.lives} left.`),
-      this.targetRows(d.targets),
-      this.chaosLines(d.lines, d.total),
+      d.success ? 'result win' : 'result',
+      h('h2', { class: d.success ? 'win' : 'lose' }, d.success ? 'Coast drowned!' : 'The walls held'),
+      h(
+        'p',
+        { class: 'muted' },
+        d.success
+          ? 'Every city is in ruins.'
+          : `${d.attemptsLeft} ${d.attemptsLeft === 1 ? 'attempt' : 'attempts'} left. Your quakes stay where you put them.`,
+      ),
+      this.cityRows(d.cities),
+      this.chaosLines(d.lines, d.total, d.chaos),
       h(
         'div',
         { class: 'panel-actions' },
@@ -302,14 +535,15 @@ export class Ui {
   }
 
   showGameOver(
-    d: { cleared: number; chaos: number; targets: ResultTarget[]; lines: Line[]; total: number },
+    d: { cleared: number; chaos: number; cities: ResultCity[]; lines: Line[]; total: number; gained: number },
     a: { skills: () => void; again: () => void; menu: () => void },
   ): void {
     this.showPanel(
+      'result',
       h('h2', { class: 'lose' }, 'Run over'),
-      h('p', { class: 'muted' }, `You broke ${d.cleared} ${d.cleared === 1 ? 'sea' : 'seas'} and earned ${d.chaos} chaos.`),
-      this.targetRows(d.targets),
-      this.chaosLines(d.lines, d.total),
+      h('p', { class: 'muted' }, `You drowned ${d.cleared} ${d.cleared === 1 ? 'coast' : 'coasts'} and earned ${d.chaos} chaos this run.`),
+      this.cityRows(d.cities),
+      this.chaosLines(d.lines, d.total, d.gained),
       h(
         'div',
         { class: 'panel-actions' },
@@ -320,25 +554,28 @@ export class Ui {
     );
   }
 
-  showSkills(owned: ReadonlySet<SkillId>, chaos: number, a: { buy: (id: SkillId) => void; close: () => void }): void {
-    const cols = 4;
-    const rows = 4;
-    const pos = (s: SkillDef) => ({ x: ((s.col + 0.5) / cols) * 100, y: ((s.row + 0.5) / rows) * 100 });
+  showSkills(owned: ReadonlySet<string>, chaos: number, a: { buy: (id: string) => void; close: () => void }, justBought?: string): void {
+    const COL_W = 84;
+    const ROW_H = 92;
+    const pad = 46;
+    const width = COL_W * 9 + pad * 2;
+    const height = ROW_H * 6 + pad * 2;
+    const pos = (s: { col: number; row: number }) => ({ x: s.col * COL_W + pad, y: s.row * ROW_H + pad });
+
     const svg = document.createElementNS(svgNs, 'svg');
     svg.setAttribute('class', 'skill-links');
-    svg.setAttribute('viewBox', '0 0 100 100');
-    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
     for (const s of SKILLS) {
       for (const r of s.requires) {
-        const from = pos(SKILLS.find((x) => x.id === r)!);
+        const from = pos(SKILL_BY_ID[r]);
         const to = pos(s);
         const line = document.createElementNS(svgNs, 'line');
         line.setAttribute('x1', String(from.x));
         line.setAttribute('y1', String(from.y));
         line.setAttribute('x2', String(to.x));
         line.setAttribute('y2', String(to.y));
-        line.setAttribute('class', owned.has(r) ? 'on' : '');
-        line.setAttribute('vector-effect', 'non-scaling-stroke');
+        line.setAttribute('class', owned.has(r) ? (owned.has(s.id) ? 'on' : 'ready') : '');
         svg.append(line);
       }
     }
@@ -346,52 +583,56 @@ export class Ui {
       const p = pos(s);
       const isOwned = owned.has(s.id);
       const unlocked = s.requires.every((r) => owned.has(r));
-      const affordable = canBuy(s.id, owned, chaos);
-      const state = isOwned ? 'owned' : affordable ? 'buyable' : unlocked ? 'expensive' : 'locked';
-      return h(
+      const state = isOwned ? 'owned' : canBuy(s.id, owned, chaos) ? 'buyable' : unlocked ? 'expensive' : 'locked';
+      const color = BRANCHES.find((b) => b.id === s.branch)!.color;
+      const node = h(
         'button',
         {
-          class: `skill ${state} branch-${s.branch}${this.skillFocus === s.id ? ' focus' : ''}`,
-          style: `left: ${p.x}%; top: ${p.y}%`,
+          class: `skill ${state}${this.skillFocus === s.id ? ' focus' : ''}${justBought === s.id ? ' bought' : ''}`,
+          style: `left: ${p.x}px; top: ${p.y}px; --bc: ${color}`,
           onclick: () => {
             this.skillFocus = s.id;
             this.showSkills(owned, chaos, a);
           },
         },
+        h('span', { class: 'skill-icon' }),
         h('span', { class: 'skill-name' }, s.name),
-        h('span', { class: 'skill-desc' }, s.desc),
-        h('span', { class: 'skill-cost' }, isOwned ? 'Owned' : `${s.cost} chaos`),
       );
+      (node.firstElementChild as HTMLElement).innerHTML = iconSvg(s.icon, 22);
+      return node;
     });
-    this.overlay.hidden = false;
-    this.overlay.replaceChildren(
+
+    const tree = h('div', { class: 'skill-tree', style: `width: ${width}px; height: ${height}px` }, svg, ...nodes);
+    const labels = h(
+      'div',
+      { class: 'branch-labels', style: `width: ${width}px` },
+      ...BRANCHES.map((b, i) => h('span', { style: `color: ${b.color}; left: ${(i * 2 + 0.5) * COL_W + pad}px` }, b.name)),
+    );
+    const scroller = h('div', { class: 'skill-scroll' }, labels, tree);
+    scroller.addEventListener('scroll', () => (this.skillScroll = { left: scroller.scrollLeft, top: scroller.scrollTop }));
+    enableDragScroll(scroller);
+
+    const wasOpen = !!this.overlay.querySelector('.skills-panel');
+    this.showPanel(
+      `skills-panel${wasOpen ? ' instant' : ''}`,
       h(
         'div',
-        { class: 'panel skills-panel' },
-        h(
-          'div',
-          { class: 'skills-head' },
-          h('h2', {}, 'Skill tree'),
-          h('div', { class: 'hud-chaos big' }, `${chaos} chaos`),
-          h('button', { class: 'btn ghost', onclick: a.close }, 'Done'),
-        ),
-        h(
-          'div',
-          { class: 'branch-labels' },
-          ...['Arsenal', 'Power', 'Insight', 'Survival'].map((b) => h('span', {}, b)),
-        ),
-        h('div', { class: 'skill-tree' }, svg, ...nodes),
-        this.skillDetail(owned, chaos, a.buy),
+        { class: 'skills-head' },
+        h('h2', {}, 'Skill tree'),
+        h('div', { class: 'hud-chaos big' }, `${chaos} chaos`),
+        h('button', { class: 'btn ghost', onclick: a.close }, 'Done'),
       ),
+      scroller,
+      this.skillDetail(owned, chaos, a.buy),
     );
+    scroller.scrollLeft = this.skillScroll.left;
+    scroller.scrollTop = this.skillScroll.top;
   }
 
-  private skillFocus: SkillId | null = null;
-
-  private skillDetail(owned: ReadonlySet<SkillId>, chaos: number, buy: (id: SkillId) => void): HTMLElement {
-    const s = SKILLS.find((x) => x.id === this.skillFocus);
-    if (!s) return h('div', { class: 'skill-detail muted' }, 'Tap a skill to see what it does.');
-    const missing = s.requires.filter((r) => !owned.has(r)).map((r) => SKILLS.find((x) => x.id === r)!.name);
+  private skillDetail(owned: ReadonlySet<string>, chaos: number, buy: (id: string) => void): HTMLElement {
+    const s = this.skillFocus ? SKILL_BY_ID[this.skillFocus] : undefined;
+    if (!s) return h('div', { class: 'skill-detail muted' }, `${owned.size} of ${SKILLS.length} skills owned. Tap a skill to see what it does.`);
+    const missing = s.requires.filter((r) => !owned.has(r)).map((r) => SKILL_BY_ID[r].name);
     const status = owned.has(s.id)
       ? 'Owned'
       : missing.length
@@ -401,11 +642,41 @@ export class Ui {
           : '';
     const btn = h('button', { class: 'btn primary', onclick: () => buy(s.id) }, `Buy for ${s.cost}`);
     if (!canBuy(s.id, owned, chaos)) btn.setAttribute('disabled', '');
+    const icon = h('span', { class: 'skill-icon big', style: `--bc: ${BRANCHES.find((b) => b.id === s.branch)!.color}` });
+    icon.innerHTML = iconSvg(s.icon, 26);
     return h(
       'div',
       { class: 'skill-detail' },
-      h('div', {}, h('b', {}, s.name), h('p', {}, s.desc), status && h('span', { class: 'muted' }, status)),
+      icon,
+      h('div', { class: 'skill-text' }, h('b', {}, s.name), h('p', {}, s.desc), status && h('span', { class: 'muted' }, status)),
       !owned.has(s.id) && btn,
     );
   }
+}
+
+/** Mouse drag-to-pan for the skill tree (touch scrolls natively). */
+function enableDragScroll(el: HTMLElement): void {
+  let drag: { x: number; y: number; left: number; top: number; moved: boolean } | null = null;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    drag = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop, moved: false };
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    if (!drag.moved) return;
+    el.scrollLeft = drag.left - dx;
+    el.scrollTop = drag.top - dy;
+  });
+  const end = () => {
+    if (drag?.moved) {
+      // Swallow the click that ends a drag so it doesn't select a skill.
+      el.addEventListener('click', (e) => e.stopPropagation(), { capture: true, once: true });
+    }
+    drag = null;
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointerleave', () => (drag = null));
 }

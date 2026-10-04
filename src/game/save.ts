@@ -1,10 +1,9 @@
-import type { SkillId } from './skills.ts';
-
-const KEY = 'freakwave.save.v1';
+// v2: city-based rules and a new skill tree; v1 progress does not carry over.
+const KEY = 'freakwave.save.v2';
 
 export interface SaveData {
   chaos: number;
-  skills: SkillId[];
+  skills: string[];
   bestLevel: number;
 }
 

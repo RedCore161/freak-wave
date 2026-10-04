@@ -1,97 +1,165 @@
-import { DEFAULT_COAST_ABSORB } from '../sim/WaveSim.ts';
+import { BASE_FUSE_STEP, BASE_MAX_FUSE, COMBO_MAX, COMBO_STEP, COMBO_WINDOW } from '../sim/constants.ts';
+import { DEFAULT_COAST_ABSORB, DEFAULT_OPEN_DAMP } from '../sim/WaveSim.ts';
+import type { DamageRules } from '../sim/cities.ts';
 import type { QuakeKind, QuakeMods } from '../sim/quakes.ts';
+import type { IconId } from '../ui/icons.ts';
 
-export type SkillId =
-  | 'tremor'
-  | 'fault'
-  | 'megathrust'
-  | 'resonance'
-  | 'longperiod'
-  | 'aftershock'
-  | 'seismograph'
-  | 'isochrones'
-  | 'fuse'
-  | 'breakwater'
-  | 'chaostheory'
-  | 'mirrorcoast'
-  | 'harmonic';
+export type Branch = 'arsenal' | 'power' | 'timing' | 'destruction' | 'fortune';
 
-export interface SkillDef {
-  id: SkillId;
-  name: string;
-  desc: string;
-  cost: number;
-  requires: SkillId[];
-  /** Position in the tree view. */
-  col: number;
-  row: number;
-  branch: 'arsenal' | 'power' | 'insight' | 'survival';
-}
-
-// Upgrades grant control and information rather than raw power, so the
-// puzzle never dissolves into "just place the biggest quake".
-export const SKILLS: readonly SkillDef[] = [
-  { id: 'tremor', name: 'Spare Tremor', desc: '+1 Tremor every level.', cost: 15, requires: [], col: 0, row: 0, branch: 'arsenal' },
-  { id: 'fault', name: 'Fault Line', desc: '+1 Quake every level.', cost: 40, requires: ['tremor'], col: 0, row: 1, branch: 'arsenal' },
-  { id: 'megathrust', name: 'Megathrust', desc: '+1 Megaquake every level.', cost: 90, requires: ['fault'], col: 0, row: 2, branch: 'arsenal' },
-
-  { id: 'resonance', name: 'Resonance', desc: 'All waves 12% taller.', cost: 20, requires: [], col: 1, row: 0, branch: 'power' },
-  { id: 'longperiod', name: 'Long Period', desc: 'Waves 20% longer, so timing is more forgiving.', cost: 35, requires: ['resonance'], col: 1, row: 1, branch: 'power' },
-  { id: 'aftershock', name: 'Aftershock', desc: 'Each quake fires again 4 s later at 45% strength.', cost: 80, requires: ['longperiod'], col: 1, row: 2, branch: 'power' },
-
-  { id: 'seismograph', name: 'Seismograph', desc: 'Targets show when each quake’s biggest crest will arrive.', cost: 15, requires: [], col: 2, row: 0, branch: 'insight' },
-  { id: 'isochrones', name: 'Isochrones', desc: 'While placing, see arrival-time rings from your cursor.', cost: 35, requires: ['seismograph'], col: 2, row: 1, branch: 'insight' },
-  { id: 'fuse', name: 'Delay Fuse', desc: 'Give each quake a 0–4 s delay.', cost: 70, requires: ['isochrones'], col: 2, row: 2, branch: 'insight' },
-
-  { id: 'breakwater', name: 'Breakwater', desc: '+1 life per run.', cost: 20, requires: [], col: 3, row: 0, branch: 'survival' },
-  { id: 'chaostheory', name: 'Chaos Theory', desc: '+30% chaos earned.', cost: 40, requires: ['breakwater'], col: 3, row: 1, branch: 'survival' },
-  { id: 'mirrorcoast', name: 'Mirror Coast', desc: 'Coasts absorb 60% less, so reflections hit harder.', cost: 60, requires: ['chaostheory'], col: 3, row: 2, branch: 'survival' },
-
-  { id: 'harmonic', name: 'Harmonic Lock', desc: 'All waves another 15% taller.', cost: 140, requires: ['aftershock', 'fuse'], col: 1.5, row: 3, branch: 'power' },
+export const BRANCHES: { id: Branch; name: string; color: string }[] = [
+  { id: 'arsenal', name: 'Arsenal', color: '#ffd166' },
+  { id: 'power', name: 'Power', color: '#ff8a5c' },
+  { id: 'timing', name: 'Timing', color: '#7fd4ff' },
+  { id: 'destruction', name: 'Destruction', color: '#ff5d73' },
+  { id: 'fortune', name: 'Fortune', color: '#5dff9a' },
 ];
 
-export const SKILL_BY_ID = Object.fromEntries(SKILLS.map((s) => [s.id, s])) as Record<SkillId, SkillDef>;
-
+/** Everything skills can change. Built fresh from the owned set. */
 export interface Loadout {
   mods: QuakeMods;
   bonusQuakes: QuakeKind[];
-  lives: number;
+  attempts: number;
   chaosMul: number;
   coastAbsorb: number;
-  aftershock: boolean;
-  seismograph: boolean;
+  openDamp: number;
+  rules: DamageRules;
+  maxFuse: number;
+  fuseStep: number;
+  spawnRadiusMul: number;
+  extraSpawns: number;
+  aftershocks: number;
   isochrones: boolean;
-  fuse: boolean;
+  oracles: number;
+  slowMotion: boolean;
+  domino: boolean;
+  zoneBonus: number;
+  salvage: number;
+  perfectStorm: boolean;
 }
 
-export const BASE_LIVES = 3;
-export const AFTERSHOCK_DELAY = 4;
+export interface SkillDef {
+  id: string;
+  name: string;
+  desc: string;
+  cost: number;
+  requires: string[];
+  branch: Branch;
+  icon: IconId;
+  /** Grid position: column 0-9 (two per branch), row 0-6. */
+  col: number;
+  row: number;
+  apply: (l: Loadout) => void;
+}
+
+const S = (
+  branch: Branch,
+  col: number,
+  row: number,
+  id: string,
+  name: string,
+  icon: IconId,
+  cost: number,
+  requires: string[],
+  desc: string,
+  apply: (l: Loadout) => void,
+): SkillDef => ({ id, name, desc, cost, requires, branch, icon, col, row, apply });
+
+// Most upgrades add control, information or new tools rather than raw
+// power, so the timing puzzle never dissolves.
+export const SKILLS: readonly SkillDef[] = [
+  // Arsenal: more and new quakes.
+  S('arsenal', 0.5, 0, 'tremor1', 'Spare Tremor', 'tremor', 12, [], '+1 Tremor every sea.', (l) => l.bonusQuakes.push('small')),
+  S('arsenal', 0, 1, 'tremor2', 'Tremor Cache', 'tremor', 28, ['tremor1'], '+1 Tremor every sea.', (l) => l.bonusQuakes.push('small')),
+  S('arsenal', 1, 1, 'fault1', 'Fault Line', 'quake', 35, ['tremor1'], '+1 Quake every sea.', (l) => l.bonusQuakes.push('medium')),
+  S('arsenal', 0, 2, 'pulse1', 'Pulsar', 'pulse', 50, ['tremor2'], 'Unlock the Pulsar: a long train of small waves, made for combos. +1 per sea.', (l) => l.bonusQuakes.push('pulse')),
+  S('arsenal', 1, 2, 'fault2', 'Deep Fault', 'quake', 60, ['fault1'], '+1 Quake every sea.', (l) => l.bonusQuakes.push('medium')),
+  S('arsenal', 0, 3, 'pulse2', 'Pulsar Array', 'pulse', 90, ['pulse1'], '+1 Pulsar every sea.', (l) => l.bonusQuakes.push('pulse')),
+  S('arsenal', 1, 3, 'rift1', 'Rift', 'rift', 80, ['fault2'], 'Unlock the Rift: a fault line that fires its waves sideways. Rotate it to aim. +1 per sea.', (l) => l.bonusQuakes.push('rift')),
+  S('arsenal', 0, 4, 'rift2', 'Rift Swarm', 'rift', 140, ['rift1'], '+1 Rift every sea.', (l) => l.bonusQuakes.push('rift')),
+  S('arsenal', 1, 4, 'mega1', 'Megathrust', 'mega', 120, ['rift1'], '+1 Megaquake every sea.', (l) => l.bonusQuakes.push('large')),
+  S('arsenal', 0.5, 5, 'mega2', 'Supercontinent', 'mega', 220, ['mega1'], '+1 Megaquake every sea.', (l) => l.bonusQuakes.push('large')),
+
+  // Power: shape the waves.
+  S('power', 2.5, 0, 'res1', 'Resonance', 'wave', 15, [], 'All waves 8% taller.', (l) => (l.mods.ampMul *= 1.08)),
+  S('power', 2, 1, 'res2', 'Resonance II', 'wave', 35, ['res1'], 'All waves another 8% taller.', (l) => (l.mods.ampMul *= 1.08)),
+  S('power', 3, 1, 'long1', 'Long Period', 'longwave', 30, ['res1'], 'Waves 12% longer: crests line up more forgivingly.', (l) => (l.mods.periodMul *= 1.12)),
+  S('power', 2, 2, 'deep1', 'Deep Water', 'deep', 45, ['res2'], 'Open water drains 60% less energy.', (l) => (l.openDamp *= 0.4)),
+  S('power', 3, 2, 'long2', 'Long Period II', 'longwave', 60, ['long1'], 'Waves another 12% longer.', (l) => (l.mods.periodMul *= 1.12)),
+  S('power', 2, 3, 'res3', 'Resonance III', 'wave', 80, ['deep1'], 'All waves another 8% taller.', (l) => (l.mods.ampMul *= 1.08)),
+  S('power', 3, 3, 'train1', 'Wave Train', 'train', 90, ['long2'], 'Every quake sends one more wave.', (l) => (l.mods.extraCycles += 1)),
+  S('power', 2, 4, 'after1', 'Aftershock', 'aftershock', 110, ['res3'], 'Each quake fires again 3 s later at 45% strength.', (l) => (l.aftershocks = Math.max(l.aftershocks, 1))),
+  S('power', 3, 4, 'train2', 'Endless Train', 'train', 150, ['train1'], 'Every quake sends another extra wave.', (l) => (l.mods.extraCycles += 1)),
+  S('power', 2.5, 5, 'after2', 'Double Aftershock', 'aftershock', 200, ['after1'], 'A second aftershock 3 s after the first.', (l) => (l.aftershocks = 2)),
+  S('power', 2.5, 6, 'harmonic', 'Harmonic Lock', 'harmonic', 280, ['after2', 'train2'], 'All waves 12% taller.', (l) => (l.mods.ampMul *= 1.12)),
+
+  // Timing: see and control when crests land.
+  S('timing', 4.5, 0, 'iso', 'Isochrones', 'rings', 15, [], 'While placing, see 1-second arrival rings spread from your cursor.', (l) => (l.isochrones = true)),
+  S('timing', 4, 1, 'fuse1', 'Long Fuse', 'fuse', 25, ['iso'], 'Delays can go 3 s longer.', (l) => (l.maxFuse += 3)),
+  S('timing', 5, 1, 'fine', 'Fine Fuse', 'fine', 30, ['iso'], 'Set delays in 0.05 s steps.', (l) => (l.fuseStep = 0.05)),
+  S('timing', 4, 2, 'oracle1', 'Oracle', 'eye', 60, ['fuse1'], 'Once per attempt, preview how much damage your plan would deal.', (l) => (l.oracles += 1)),
+  S('timing', 5, 2, 'slow', 'Bullet Time', 'slow', 20, ['fine'], 'Adds a 0.5× replay speed.', (l) => (l.slowMotion = true)),
+  S('timing', 4, 3, 'oracle2', 'Clairvoyance', 'eye', 100, ['oracle1'], 'One more Oracle preview per attempt.', (l) => (l.oracles += 1)),
+  S('timing', 5, 3, 'fuse2', 'Fuse Mastery', 'fuse', 70, ['slow'], 'Delays can go another 3 s longer.', (l) => (l.maxFuse += 3)),
+  S('timing', 4.5, 4, 'rhythm', 'Rhythm', 'combo', 90, ['oracle2', 'fuse2'], 'Crests chain into combos over a 0.5 s longer window.', (l) => (l.rules.comboWindow += 0.5)),
+  S('timing', 4.5, 5, 'crescendo', 'Crescendo', 'combo', 140, ['rhythm'], 'Each combo step adds 10% more damage.', (l) => (l.rules.comboStep += 0.1)),
+  S('timing', 4.5, 6, 'fortissimo', 'Fortissimo', 'combo', 220, ['crescendo'], 'Combo multiplier can climb 1× higher.', (l) => (l.rules.comboMax += 1)),
+
+  // Destruction: hit cities harder.
+  S('destruction', 6.5, 0, 'ram1', 'Battering Ram', 'ram', 15, [], 'Crests deal 15% more damage.', (l) => (l.rules.damageMul *= 1.15)),
+  S('destruction', 6, 1, 'under1', 'Undertow', 'wall', 30, ['ram1'], 'City walls 8% lower.', (l) => (l.rules.protectionMul *= 0.92)),
+  S('destruction', 7, 1, 'mirror1', 'Mirror Coast', 'mirror', 30, ['ram1'], 'Coasts absorb 40% less: reflections hit harder.', (l) => (l.coastAbsorb *= 0.6)),
+  S('destruction', 6, 2, 'under2', 'Undertow II', 'wall', 60, ['under1'], 'City walls another 8% lower.', (l) => (l.rules.protectionMul *= 0.92)),
+  S('destruction', 7, 2, 'mirror2', 'Hall of Mirrors', 'mirror', 70, ['mirror1'], 'Coasts absorb another 40% less.', (l) => (l.coastAbsorb *= 0.6)),
+  S('destruction', 6, 3, 'ram2', 'Battering Ram II', 'ram', 90, ['under2'], 'Crests deal another 15% more damage.', (l) => (l.rules.damageMul *= 1.15)),
+  S('destruction', 7, 3, 'domino', 'Domino', 'domino', 120, ['mirror2'], 'A ruined city collapses into the sea and sets off a Quake.', (l) => (l.domino = true)),
+  S('destruction', 6.5, 4, 'under3', 'Erosion', 'wall', 160, ['ram2'], 'City walls another 10% lower.', (l) => (l.rules.protectionMul *= 0.9)),
+  S('destruction', 6.5, 5, 'ram3', 'Wrecking Tide', 'ram', 240, ['under3', 'domino'], 'Crests deal 20% more damage.', (l) => (l.rules.damageMul *= 1.2)),
+
+  // Fortune: attempts, chaos and epicenters.
+  S('fortune', 8.5, 0, 'break1', 'Breakwater', 'shield', 18, [], '+1 attempt per sea.', (l) => (l.attempts += 1)),
+  S('fortune', 8, 1, 'chaos1', 'Chaos Theory', 'chaos', 30, ['break1'], '+25% chaos earned.', (l) => (l.chaosMul += 0.25)),
+  S('fortune', 9, 1, 'spawnR', 'Wide Epicenters', 'spawn', 35, ['break1'], 'Epicenters 25% wider.', (l) => (l.spawnRadiusMul *= 1.25)),
+  S('fortune', 8, 2, 'salvage', 'Salvage', 'salvage', 40, ['chaos1'], 'Unused quakes pay 6 chaos each instead of 3.', (l) => (l.salvage = 6)),
+  S('fortune', 9, 2, 'spawnX', 'Extra Epicenter', 'spawn', 70, ['spawnR'], '+1 epicenter every sea.', (l) => (l.extraSpawns += 1)),
+  S('fortune', 8, 3, 'amp1', 'Amplifier', 'amp', 60, ['salvage'], 'Chaos rings multiply by an extra 0.5×.', (l) => (l.zoneBonus += 0.5)),
+  S('fortune', 9, 3, 'break2', 'Second Wind', 'shield', 90, ['spawnX'], '+1 attempt per sea.', (l) => (l.attempts += 1)),
+  S('fortune', 8.5, 4, 'chaos2', 'Butterfly Effect', 'chaos', 130, ['amp1'], '+25% chaos earned.', (l) => (l.chaosMul += 0.25)),
+  S('fortune', 8.5, 5, 'perfect', 'Perfect Storm', 'storm', 180, ['chaos2', 'break2'], 'Clearing a sea on the first attempt pays 1.5× chaos.', (l) => (l.perfectStorm = true)),
+];
+
+export const SKILL_BY_ID: Record<string, SkillDef> = Object.fromEntries(SKILLS.map((s) => [s.id, s]));
+
+export const BASE_ATTEMPTS = 3;
+export const AFTERSHOCK_DELAY = 3;
 export const AFTERSHOCK_STRENGTH = 0.45;
-export const MAX_FUSE = 4;
 
-export function loadout(owned: ReadonlySet<SkillId>): Loadout {
-  const has = (id: SkillId) => owned.has(id);
-  const bonusQuakes: QuakeKind[] = [];
-  if (has('tremor')) bonusQuakes.push('small');
-  if (has('fault')) bonusQuakes.push('medium');
-  if (has('megathrust')) bonusQuakes.push('large');
-  return {
-    mods: {
-      ampMul: (has('resonance') ? 1.12 : 1) * (has('harmonic') ? 1.15 : 1),
-      periodMul: has('longperiod') ? 1.2 : 1,
-    },
-    bonusQuakes,
-    lives: BASE_LIVES + (has('breakwater') ? 1 : 0),
-    chaosMul: has('chaostheory') ? 1.3 : 1,
-    coastAbsorb: DEFAULT_COAST_ABSORB * (has('mirrorcoast') ? 0.4 : 1),
-    aftershock: has('aftershock'),
-    seismograph: has('seismograph'),
-    isochrones: has('isochrones'),
-    fuse: has('fuse'),
+export function loadout(owned: ReadonlySet<string>): Loadout {
+  const l: Loadout = {
+    mods: { ampMul: 1, periodMul: 1, extraCycles: 0 },
+    bonusQuakes: [],
+    attempts: BASE_ATTEMPTS,
+    chaosMul: 1,
+    coastAbsorb: DEFAULT_COAST_ABSORB,
+    openDamp: DEFAULT_OPEN_DAMP,
+    rules: { damageMul: 1, protectionMul: 1, comboWindow: COMBO_WINDOW, comboStep: COMBO_STEP, comboMax: COMBO_MAX },
+    maxFuse: BASE_MAX_FUSE,
+    fuseStep: BASE_FUSE_STEP,
+    spawnRadiusMul: 1,
+    extraSpawns: 0,
+    aftershocks: 0,
+    isochrones: false,
+    oracles: 0,
+    slowMotion: false,
+    domino: false,
+    zoneBonus: 0,
+    salvage: 3,
+    perfectStorm: false,
   };
+  for (const s of SKILLS) if (owned.has(s.id)) s.apply(l);
+  return l;
 }
 
-export function canBuy(id: SkillId, owned: ReadonlySet<SkillId>, chaos: number): boolean {
+export function canBuy(id: string, owned: ReadonlySet<string>, chaos: number): boolean {
   const def = SKILL_BY_ID[id];
-  return !owned.has(id) && chaos >= def.cost && def.requires.every((r) => owned.has(r));
+  return !!def && !owned.has(id) && chaos >= def.cost && def.requires.every((r) => owned.has(r));
 }

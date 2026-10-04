@@ -1,16 +1,26 @@
+import type { CitySpec } from '../sim/cities.ts';
 import type { QuakeKind } from '../sim/quakes.ts';
 
-export interface TargetSpec {
+export interface SpawnArea {
   x: number;
   y: number;
-  /** Required crest height in metres. */
-  required: number;
+  r: number;
+}
+
+/** Optional bonus ring at sea: a crest this high multiplies the chaos reward. */
+export interface ChaosZone {
+  x: number;
+  y: number;
+  threshold: number;
+  mult: number;
 }
 
 export interface QuakePlacement {
   kind: QuakeKind;
   x: number;
   y: number;
+  delay: number;
+  angle: number;
 }
 
 export interface LevelData {
@@ -18,15 +28,15 @@ export interface LevelData {
   name: string;
   seed: number;
   land: Uint8Array;
-  targets: TargetSpec[];
+  cities: CitySpec[];
+  spawns: SpawnArea[];
+  zones: ChaosZone[];
   /** Quakes the level grants before skill bonuses. */
   inventory: QuakeKind[];
-  /** A known solution the generator verified (kept for debugging/hints). */
+  /** A known solution the generator verified (debugging and playtests). */
   witness: QuakePlacement[];
-  /** Best crest any single quake can reach at each target (difficulty check). */
-  singleBest: number[];
-  /** Requirement vs best one-quake-per-target plan; above 1 means waves must combine. */
-  soloRatio: number;
+  /** Best city's damage with all delays at zero, over its hp: below 1 means timing is required. */
+  timingRatio: number;
 }
 
 export interface LevelRequest {

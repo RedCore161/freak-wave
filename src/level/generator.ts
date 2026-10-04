@@ -1,250 +1,323 @@
-import { DT, GRID_H, GRID_W, QUAKE_MIN_SEPARATION, SIM_STEPS, SPONGE, TARGET_RADIUS } from '../sim/constants.ts';
-import { buildWaveform, NO_MODS, QUAKE_ORDER, QUAKE_TYPES, type QuakeKind } from '../sim/quakes.ts';
+import {
+  BASE_FUSE_STEP,
+  BASE_MAX_FUSE,
+  CITY_SHORE_RADIUS,
+  DT,
+  GRID_H,
+  GRID_W,
+  QUAKE_MIN_SEPARATION,
+  RECIP_STEPS,
+  SIM_STEPS,
+  SPAWN_RADIUS,
+  SPONGE,
+  ZONE_RADIUS,
+} from '../sim/constants.ts';
+import { replayDamage, shoreHeight, type CitySpec } from '../sim/cities.ts';
+import { buildWaveform, NO_MODS, type QuakeKind } from '../sim/quakes.ts';
 import { makeRng, pick } from '../sim/rng.ts';
 import { WaveSim } from '../sim/WaveSim.ts';
 import { placementProblem } from './placement.ts';
 import { distanceTo, generateIslands } from './terrain.ts';
-import type { LevelData, LevelRequest, QuakePlacement, TargetSpec } from './types.ts';
+import type { ChaosZone, LevelData, LevelRequest, QuakePlacement, SpawnArea } from './types.ts';
 
-// Level generation works backwards from the target, using reciprocity: the
-// crest a quake at P produces at target T (and when it arrives) equals what a
-// quake at T produces at P. One simulation per quake type fired from the
-// target therefore tells us, for every cell, how strong and how late that
-// quake's crest would be at the target. From that we build a witness solution
-// whose crests arrive together, verify it with a forward simulation, and
-// compare against the best any single quake could do.
+// Levels are built backwards from the cities using reciprocity: the crest a
+// quake at P produces at city C (and when it arrives) equals what a quake at C
+// produces at P. One reverse simulation per city and quake type tells us, for
+// every spawn cell, how strong and how late its crest would be at the city.
+// The witness solution picks strong spawn cells and *delays* them so their
+// crests land together. Sea walls are set so no single quake can top them, and
+// the same placements without delays are checked to fall short, which makes
+// timing the heart of the puzzle.
 
-const MAX_ATTEMPTS = 3;
-/** Stop searching once no single quake reaches this share of a requirement. */
-const GOOD_SINGLE_RATIO = 1.15;
-const TARGET_SEPARATION = 45;
-/** Crests count as aligned within this fraction of a wave period. */
-const ALIGN_TOLERANCE = 0.12;
+const MAX_ATTEMPTS = 8;
+/** Accept as soon as the undelayed witness deals at most this share of hp. */
+const GOOD_TIMING_RATIO = 0.7;
+const CITY_SEPARATION = 30;
+const SPAWN_CITY_DISTANCE = 38;
+const MIN_WALL = 1.5;
+/** Share of the witness damage needed to ruin a city. */
+const HP_FRACTION = 0.8;
+/** Cities that would fall to a sliver of overflow are rejected as trivial. */
+const MIN_WITNESS_DAMAGE = 2;
 
 export function landFraction(index: number): number {
-  return Math.min(0.3, 0.1 + index * 0.02);
+  return Math.min(0.28, 0.12 + index * 0.02);
 }
 
-export function targetCount(index: number): number {
-  return index < 3 ? 1 : 2;
+/** City levels for a sea; a city of level L is ruined by about L+1 quakes. */
+export function cityLevels(index: number, rng: () => number): number[] {
+  const fixed = [[1], [1], [2], [1, 1], [1, 2], [2, 2]];
+  if (index < fixed.length) return fixed[index];
+  const options = [[1, 1, 2], [3, 1], [2, 3], [1, 1, 1], [3, 2]];
+  return pick(rng, options);
 }
 
-/** Share of the verified witness height the player must reach. */
-export function requireFraction(index: number): number {
-  return Math.min(0.9, 0.78 + index * 0.012);
+function spawnCount(index: number): number {
+  return index < 2 ? 2 : 3;
 }
 
-export function baseInventory(index: number, rng: () => number): QuakeKind[] {
-  if (index === 0) return ['small', 'small'];
-  if (index === 1) return ['small', 'small', 'medium'];
-  if (index === 2) return ['small', 'medium', 'medium'];
-  const n = index < 6 ? 4 : rng() < 0.5 ? 4 : 5;
-  const out: QuakeKind[] = [];
-  for (let k = 0; k < n; k++) {
-    const r = rng();
-    out.push(index >= 5 && r < 0.15 ? 'large' : r < 0.55 ? 'small' : 'medium');
-  }
-  return sortKinds(out);
-}
-
-function sortKinds(kinds: QuakeKind[]): QuakeKind[] {
-  return kinds.sort((a, b) => QUAKE_ORDER.indexOf(a) - QUAKE_ORDER.indexOf(b));
+function quakeKindFor(index: number, rng: () => number): QuakeKind {
+  if (index === 0) return 'small';
+  const r = rng();
+  if (index >= 4 && r < 0.12) return 'large';
+  return r < 0.5 ? 'small' : 'medium';
 }
 
 const NAME_A = ['Restless', 'Hollow', 'Broken', 'Silent', 'Shivering', 'Drowned', 'Crooked', 'Salt', 'Iron', 'Glass', 'Sleeping', 'Pale'];
 const NAME_B = ['Reach', 'Shoals', 'Narrows', 'Sound', 'Atoll', 'Strait', 'Deep', 'Basin', 'Expanse', 'Gulf', 'Reef', 'Passage'];
+const CITY_A = ['Port', 'Fort', 'Saint', 'New', 'Old', 'Upper', 'Low', 'Bay'];
+const CITY_B = ['Harrow', 'Calder', 'Mira', 'Vessa', 'Orrin', 'Talis', 'Brine', 'Kestrel', 'Morrow', 'Quay', 'Lumen', 'Gale', 'Selk', 'Dunmore'];
 
 interface Response {
   peak: Float32Array;
   step: Uint16Array;
 }
 
+interface Site {
+  x: number;
+  y: number;
+  shore: number[];
+  /** Water cell the reverse simulation fires from. */
+  mouth: number;
+}
+
 interface Candidate {
-  targets: TargetSpec[];
+  cities: CitySpec[];
+  spawns: SpawnArea[];
   witness: QuakePlacement[];
-  singleBest: number[];
-  ratio: number;
+  inventory: QuakeKind[];
+  timingRatio: number;
+  peakField: Float32Array;
 }
 
 export function generateLevel(req: LevelRequest): LevelData {
   const rng = makeRng(req.seed);
   const land = req.land ?? generateIslands(rng, landFraction(req.index));
-  const inventory = baseInventory(req.index, rng);
   const name = req.name ?? `${pick(rng, NAME_A)} ${pick(rng, NAME_B)}`;
-  const nTargets = targetCount(req.index);
-  const frac = requireFraction(req.index);
+  const levels = cityLevels(req.index, rng);
   const coast = distanceTo(land, 1, 32);
 
   let best: Candidate | null = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const c = tryBuild(rng, land, coast, inventory, nTargets, frac);
-    if (c && (!best || c.ratio > best.ratio)) best = c;
-    if (best && best.ratio >= GOOD_SINGLE_RATIO) break;
+    const c = tryBuild(rng, req.index, land, coast, levels);
+    if (c && (!best || c.timingRatio < best.timingRatio)) best = c;
+    if (best && best.timingRatio <= GOOD_TIMING_RATIO) break;
   }
   if (!best) throw new Error(`Could not generate level ${req.index} (seed ${req.seed})`);
+  const zones = req.index >= 1 ? pickZones(land, coast, best) : [];
   return {
     index: req.index,
     name,
     seed: req.seed,
     land,
-    targets: best.targets,
-    inventory,
+    cities: best.cities,
+    spawns: best.spawns,
+    zones,
+    inventory: best.inventory,
     witness: best.witness,
-    singleBest: best.singleBest,
-    soloRatio: best.ratio,
+    timingRatio: best.timingRatio,
   };
 }
 
-function tryBuild(
-  rng: () => number,
-  land: Uint8Array,
-  coast: Uint8Array,
-  inventory: readonly QuakeKind[],
-  nTargets: number,
-  frac: number,
-): Candidate | null {
-  const spots = pickTargetSpots(rng, land, coast, nTargets);
-  if (!spots) return null;
+function tryBuild(rng: () => number, index: number, land: Uint8Array, coast: Uint8Array, levels: number[]): Candidate | null {
+  const sites = pickCitySites(rng, land, levels.length);
+  if (!sites) return null;
+  const spawns = pickSpawns(rng, land, coast, sites, spawnCount(index), []);
+  if (!spawns) return null;
 
-  const responses = spots.map((t) => {
+  const groups = levels.map((lvl) => Array.from({ length: lvl + 1 }, () => quakeKindFor(index, rng)));
+  const inventory = groups.flat();
+
+  // Reverse simulations: one per city and quake type.
+  const responses = sites.map((s) => {
     const byKind = new Map<QuakeKind, Response>();
-    for (const kind of new Set(inventory)) byKind.set(kind, reciprocalResponse(land, t, kind));
+    for (const kind of new Set(inventory)) {
+      const sim = new WaveSim(land, { trackPeak: true, trackPeakTime: true });
+      const mx = s.mouth % GRID_W;
+      sim.addSource({ x: mx, y: (s.mouth - mx) / GRID_W, waveform: buildWaveform(kind, NO_MODS), startStep: 0 });
+      sim.run(RECIP_STEPS);
+      byKind.set(kind, { peak: sim.peak!, step: sim.peakStep! });
+    }
     return byKind;
   });
+  const spawnCells = cellsInSpawns(land, spawns);
 
-  // Deal quakes to targets strongest first, round-robin.
-  const strongestFirst = [...inventory].reverse();
-  const groups: QuakeKind[][] = spots.map(() => []);
-  strongestFirst.forEach((k, i) => groups[i % spots.length].push(k));
-
+  // Witness: strongest spawn cell per quake, then delays that line crests up.
   const witness: QuakePlacement[] = [];
-  for (let t = 0; t < spots.length; t++) {
-    let refStep = -1;
-    for (const kind of groups[t]) {
-      const r = responses[t].get(kind)!;
-      const cell = chooseCell(rng, land, coast, spots, witness, r, kind, refStep);
-      if (cell < 0) return null;
-      if (refStep < 0) refStep = r.step[cell];
-      const x = cell % GRID_W;
-      witness.push({ kind, x, y: (cell - x) / GRID_W });
-    }
-  }
-
-  // Verify with the real forward simulation (also captures cross-talk
-  // between groups and any reflections the estimate missed).
-  const sim = new WaveSim(land, { trackPeak: true });
-  for (const q of witness) sim.addSource({ x: q.x, y: q.y, waveform: buildWaveform(q.kind, NO_MODS), startStep: 0 });
-  sim.run(SIM_STEPS);
-  const targets = spots.map((s) => {
-    const peak = sim.maxInRadius(sim.peak!, s.x, s.y, TARGET_RADIUS);
-    return { x: s.x, y: s.y, required: Math.floor(peak * frac * 10) / 10 };
-  });
-
-  // Best single-quake crest per target and quake type, over every legal spot.
-  const singleByKind = responses.map((byKind) => {
-    const out = new Map<QuakeKind, number>();
-    for (const [kind, r] of byKind) {
-      let best = 0;
-      for (let idx = 0; idx < r.peak.length; idx++) {
-        const v = r.peak[idx];
-        if (v <= best) continue;
-        const x = idx % GRID_W;
-        if (placementProblem(land, x, (idx - x) / GRID_W, spots, [])) continue;
-        best = v;
+  groups.forEach((group, c) => {
+    const picks: { kind: QuakeKind; cell: number; step: number }[] = [];
+    for (const kind of group) {
+      const r = responses[c].get(kind)!;
+      let bestCell = -1;
+      for (const cell of spawnCells) {
+        const x = cell % GRID_W;
+        const y = (cell - x) / GRID_W;
+        if (witness.some((q) => Math.hypot(q.x - x, q.y - y) < QUAKE_MIN_SEPARATION + 1)) continue;
+        if (picks.some((p) => Math.hypot((p.cell % GRID_W) - x, Math.floor(p.cell / GRID_W) - y) < QUAKE_MIN_SEPARATION + 1)) continue;
+        // Spread quakes over different epicenters when it costs little.
+        const crowd = picks.filter((p) => sameSpawn(spawns, p.cell, cell)).length;
+        const score = r.peak[cell] * (1 - 0.15 * crowd);
+        if (bestCell < 0 || score > r.peak[bestCell] * (1 - 0.15 * picks.filter((p) => sameSpawn(spawns, p.cell, bestCell)).length)) {
+          bestCell = cell;
+        }
       }
-      out.set(kind, best);
+      if (bestCell < 0) return;
+      picks.push({ kind, cell: bestCell, step: r.step[bestCell] });
     }
-    return out;
+    const latest = Math.max(...picks.map((p) => p.step));
+    for (const p of picks) {
+      const x = p.cell % GRID_W;
+      const raw = (latest - p.step) * DT;
+      const delay = Math.min(BASE_MAX_FUSE, Math.round(raw / BASE_FUSE_STEP) * BASE_FUSE_STEP);
+      witness.push({ kind: p.kind, x, y: (p.cell - x) / GRID_W, delay, angle: 0 });
+    }
   });
-  const singleBest = singleByKind.map((m) => Math.max(...m.values()));
-  return { targets, witness, singleBest, ratio: soloRatio(targets, inventory, singleByKind) };
-}
+  if (witness.length !== inventory.length) return null;
 
-/**
- * How far the best "one quake per target" plan falls short: 1.2 means even
- * the best assignment of distinct single quakes reaches only 1/1.2 of the
- * weakest requirement. Below 1 the level can be solved without interference.
- */
-function soloRatio(targets: readonly TargetSpec[], inventory: readonly QuakeKind[], single: Map<QuakeKind, number>[]): number {
-  let bestCover = 0;
-  const assign = (t: number, used: Set<number>, cover: number) => {
-    if (t === targets.length) {
-      bestCover = Math.max(bestCover, cover);
-      return;
-    }
-    inventory.forEach((kind, i) => {
-      if (used.has(i)) return;
-      used.add(i);
-      assign(t + 1, used, Math.min(cover, single[t].get(kind)! / Math.max(targets[t].required, 1e-3)));
-      used.delete(i);
+  const timed = forwardSeries(land, sites, witness, true);
+  const flat = forwardSeries(land, sites, witness, false);
+
+  const cities: CitySpec[] = [];
+  let timingRatio = Infinity;
+  for (let c = 0; c < sites.length; c++) {
+    const crest = Math.max(...timed.series[c]);
+    // Best a single quake of any available type can do from any spawn cell.
+    let single = 0;
+    for (const r of responses[c].values()) for (const cell of spawnCells) single = Math.max(single, r.peak[cell]);
+    const wall = Math.max(MIN_WALL, single * 1.1, crest * 0.5);
+    if (wall >= crest * 0.92) return null;
+    const damage = replayDamage(timed.series[c], wall);
+    if (damage < MIN_WITNESS_DAMAGE) return null;
+    const hp = Math.round(damage * HP_FRACTION * 10) / 10;
+    timingRatio = Math.min(timingRatio, replayDamage(flat.series[c], wall) / hp);
+    cities.push({
+      name: `${pick(rng, CITY_A)} ${pick(rng, CITY_B)}`,
+      x: sites[c].x,
+      y: sites[c].y,
+      level: levels[c],
+      protection: Math.round(wall * 10) / 10,
+      hp,
+      shore: sites[c].shore,
     });
-  };
-  assign(0, new Set(), Infinity);
-  return 1 / bestCover;
+  }
+  return { cities, spawns, witness, inventory, timingRatio, peakField: timed.peak };
 }
 
-function pickTargetSpots(rng: () => number, land: Uint8Array, coast: Uint8Array, count: number): { x: number; y: number }[] | null {
-  const margin = SPONGE + 6;
-  const spots: { x: number; y: number }[] = [];
-  for (let tries = 0; tries < 500 && spots.length < count; tries++) {
+function sameSpawn(spawns: readonly SpawnArea[], a: number, b: number): boolean {
+  const which = (cell: number) => {
+    const x = cell % GRID_W;
+    const y = (cell - x) / GRID_W;
+    return spawns.findIndex((s) => Math.hypot(s.x - x, s.y - y) <= s.r);
+  };
+  return which(a) === which(b);
+}
+
+function forwardSeries(land: Uint8Array, sites: readonly Site[], witness: readonly QuakePlacement[], useDelays: boolean) {
+  const sim = new WaveSim(land, { trackPeak: true });
+  for (const q of witness) {
+    sim.addSource({
+      x: q.x,
+      y: q.y,
+      waveform: buildWaveform(q.kind, NO_MODS),
+      startStep: useDelays ? Math.round(q.delay / DT) : 0,
+    });
+  }
+  const series = sites.map(() => new Float32Array(SIM_STEPS));
+  for (let s = 0; s < SIM_STEPS; s++) {
+    sim.step();
+    sites.forEach((site, c) => (series[c][s] = shoreHeight(sim.u, site.shore)));
+  }
+  return { series, peak: sim.peak! };
+}
+
+function pickCitySites(rng: () => number, land: Uint8Array, count: number): Site[] | null {
+  const margin = SPONGE + 3;
+  const sites: Site[] = [];
+  for (let tries = 0; tries < 3000 && sites.length < count; tries++) {
     const x = margin + Math.floor(rng() * (GRID_W - 2 * margin));
     const y = margin + Math.floor(rng() * (GRID_H - 2 * margin));
-    const idx = y * GRID_W + x;
-    if (land[idx] || coast[idx] < 4) continue;
-    if (spots.some((s) => Math.hypot(s.x - x, s.y - y) < TARGET_SEPARATION)) continue;
-    spots.push({ x, y });
+    if (!land[y * GRID_W + x]) continue;
+    if (sites.some((s) => Math.hypot(s.x - x, s.y - y) < CITY_SEPARATION)) continue;
+    const shore: number[] = [];
+    let mouth = -1;
+    let mouthD = Infinity;
+    for (let dy = -CITY_SHORE_RADIUS; dy <= CITY_SHORE_RADIUS; dy++) {
+      for (let dx = -CITY_SHORE_RADIUS; dx <= CITY_SHORE_RADIUS; dx++) {
+        const d = Math.hypot(dx, dy);
+        if (d > CITY_SHORE_RADIUS) continue;
+        const px = x + dx;
+        const py = y + dy;
+        if (px < SPONGE || py < SPONGE || px >= GRID_W - SPONGE || py >= GRID_H - SPONGE) continue;
+        const idx = py * GRID_W + px;
+        if (land[idx]) continue;
+        shore.push(idx);
+        if (d < mouthD) {
+          mouthD = d;
+          mouth = idx;
+        }
+      }
+    }
+    // A city needs open water in front of it, but must sit on the coast.
+    if (shore.length < 10 || mouthD > 2.5) continue;
+    sites.push({ x, y, shore, mouth });
   }
-  return spots.length === count ? spots : null;
+  return sites.length === count ? sites : null;
 }
 
-function reciprocalResponse(land: Uint8Array, at: { x: number; y: number }, kind: QuakeKind): Response {
-  const sim = new WaveSim(land, { trackPeak: true, trackPeakTime: true });
-  sim.addSource({ x: at.x, y: at.y, waveform: buildWaveform(kind, NO_MODS), startStep: 0 });
-  sim.run(SIM_STEPS);
-  return { peak: sim.peak!, step: sim.peakStep! };
-}
-
-/**
- * First quake of a group: a random strong cell (variety between levels).
- * Later quakes: the strongest cell whose crest arrives with the first one.
- */
-function chooseCell(
+/** Picks epicenters far from cities; `existing` are kept clear of. */
+export function pickSpawns(
   rng: () => number,
   land: Uint8Array,
   coast: Uint8Array,
-  targets: readonly { x: number; y: number }[],
-  placed: readonly QuakePlacement[],
-  r: Response,
-  kind: QuakeKind,
-  refStep: number,
-): number {
-  const tolSteps = (ALIGN_TOLERANCE * QUAKE_TYPES[kind].period) / DT;
-  const valid: number[] = [];
-  let maxPeak = 0;
-  for (let y = SPONGE; y < GRID_H - SPONGE; y++) {
-    for (let x = SPONGE; x < GRID_W - SPONGE; x++) {
+  cities: readonly { x: number; y: number }[],
+  count: number,
+  existing: readonly SpawnArea[],
+  radius = SPAWN_RADIUS,
+): SpawnArea[] | null {
+  const margin = SPONGE + Math.ceil(radius);
+  const out: SpawnArea[] = [];
+  for (let tries = 0; tries < 3000 && out.length < count; tries++) {
+    const x = margin + Math.floor(rng() * (GRID_W - 2 * margin));
+    const y = margin + Math.floor(rng() * (GRID_H - 2 * margin));
+    if (coast[y * GRID_W + x] < 4) continue;
+    if (cities.some((c) => Math.hypot(c.x - x, c.y - y) < SPAWN_CITY_DISTANCE)) continue;
+    if ([...existing, ...out].some((s) => Math.hypot(s.x - x, s.y - y) < s.r + radius + 12)) continue;
+    out.push({ x, y, r: radius });
+  }
+  return out.length === count ? out : null;
+}
+
+function cellsInSpawns(land: Uint8Array, spawns: readonly SpawnArea[]): number[] {
+  const out: number[] = [];
+  for (let y = 0; y < GRID_H; y++) {
+    for (let x = 0; x < GRID_W; x++) {
+      if (!placementProblem(land, x, y, spawns, [])) out.push(y * GRID_W + x);
+    }
+  }
+  return out;
+}
+
+/** A bonus ring where the witness produced a big crest out at sea. */
+function pickZones(land: Uint8Array, coast: Uint8Array, c: Candidate): ChaosZone[] {
+  const margin = SPONGE + 4;
+  let bestIdx = -1;
+  for (let y = margin; y < GRID_H - margin; y++) {
+    for (let x = margin; x < GRID_W - margin; x++) {
       const idx = y * GRID_W + x;
-      if (coast[idx] < 2) continue;
-      if (placementProblem(land, x, y, targets, placed, QUAKE_MIN_SEPARATION + 2)) continue;
-      valid.push(idx);
-      if (r.peak[idx] > maxPeak) maxPeak = r.peak[idx];
+      if (land[idx] || coast[idx] < 4) continue;
+      if (c.spawns.some((s) => Math.hypot(s.x - x, s.y - y) < s.r + 8)) continue;
+      if (c.cities.some((s) => Math.hypot(s.x - x, s.y - y) < 14)) continue;
+      if (bestIdx < 0 || c.peakField[idx] > c.peakField[bestIdx]) bestIdx = idx;
     }
   }
-  if (valid.length === 0) return -1;
-  if (refStep < 0) {
-    const strong = valid.filter((idx) => r.peak[idx] >= maxPeak * 0.75);
-    return strong[Math.floor(rng() * strong.length)];
-  }
-  let best = -1;
-  let bestScore = -Infinity;
-  for (const idx of valid) {
-    const off = Math.abs(r.step[idx] - refStep);
-    // Aligned cells win outright; otherwise prefer the closest timing.
-    const score = off <= tolSteps ? r.peak[idx] : -off;
-    if (score > bestScore) {
-      bestScore = score;
-      best = idx;
+  if (bestIdx < 0) return [];
+  const x = bestIdx % GRID_W;
+  const y = (bestIdx - x) / GRID_W;
+  let peak = 0;
+  for (let dy = -ZONE_RADIUS; dy <= ZONE_RADIUS; dy++) {
+    for (let dx = -ZONE_RADIUS; dx <= ZONE_RADIUS; dx++) {
+      if (dx * dx + dy * dy <= ZONE_RADIUS * ZONE_RADIUS) peak = Math.max(peak, c.peakField[(y + dy) * GRID_W + x + dx]);
     }
   }
-  return best;
+  return [{ x, y, threshold: Math.floor(peak * 0.85 * 10) / 10, mult: 1.5 }];
 }

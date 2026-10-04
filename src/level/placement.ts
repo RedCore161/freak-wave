@@ -1,4 +1,5 @@
-import { EDGE_MARGIN, GRID_H, GRID_W, QUAKE_MIN_SEPARATION, TARGET_EXCLUSION } from '../sim/constants.ts';
+import { GRID_W, QUAKE_MIN_SEPARATION } from '../sim/constants.ts';
+import type { SpawnArea } from './types.ts';
 
 interface Point {
   x: number;
@@ -10,21 +11,16 @@ export function placementProblem(
   land: Uint8Array,
   x: number,
   y: number,
-  targets: readonly Point[],
+  spawns: readonly SpawnArea[],
   others: readonly Point[],
-  minSeparation = QUAKE_MIN_SEPARATION,
+  radiusMul = 1,
 ): string | null {
-  const cx = Math.round(x);
-  const cy = Math.round(y);
-  if (cx < EDGE_MARGIN || cy < EDGE_MARGIN || cx >= GRID_W - EDGE_MARGIN || cy >= GRID_H - EDGE_MARGIN) {
-    return 'Too close to the edge of the map';
+  if (!spawns.some((s) => Math.hypot(s.x - x, s.y - y) <= s.r * radiusMul)) {
+    return 'Quakes can only start inside a green epicenter';
   }
-  if (land[cy * GRID_W + cx]) return 'Quakes must be placed on water';
-  for (const t of targets) {
-    if (Math.hypot(t.x - x, t.y - y) < TARGET_EXCLUSION) return 'Too close to a target';
-  }
+  if (land[Math.round(y) * GRID_W + Math.round(x)]) return 'Quakes must be placed on water';
   for (const o of others) {
-    if (Math.hypot(o.x - x, o.y - y) < minSeparation) return 'Too close to another quake';
+    if (Math.hypot(o.x - x, o.y - y) < QUAKE_MIN_SEPARATION) return 'Too close to another quake';
   }
   return null;
 }
