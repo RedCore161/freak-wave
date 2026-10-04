@@ -22,6 +22,7 @@ Tools:
 | `npm run levels` | Regenerates the 12 campaign maps in `public/levels/` from `scripts/make-levels.mjs` |
 | `node scripts/campaign-test.ts` | Parses every campaign map and generates its level (walls, hp, timing check) |
 | `node scripts/settle-test.ts` | Shows how long attempts last with the early-end rules |
+| `node scripts/robust-test.ts` | Win rate per campaign sea for imperfect play (random spots in the right epicenters, timeline-aligned delays) |
 | `npm run calibrate` | Prints wave height and crest arrival vs distance per quake type |
 | `node scripts/gen-test.ts` | Generates levels headlessly and reports timing, walls and hp |
 | `node scripts/timing-test.ts` | Checks levels are solvable by lining up the timeline's crest estimates |
@@ -29,7 +30,9 @@ Tools:
 
 ## How a round works
 
-1. Pick a quake in the tray and tap inside a **green epicenter**. Drag to move it.
+1. Pick a quake in the tray and tap the sea. Inside a **green epicenter** a quake has
+   full power; outside, its power fades with distance (down to 10%). Quakes can
+   never be placed within 22 cells of a city (red ring). Drag to move.
 2. Each quake appears on the **timeline**. Drag its diamond to delay it. Under
    each city, coloured marks show when each quake's first big crest will
    arrive. Line the marks up so the crests stack.
@@ -37,6 +40,9 @@ Tools:
    the overflow. Crests within 1.3 s of each other combo (up to 2× by default).
 4. Ruin every city to clear the sea. You get 3 attempts per sea, and your
    placements are kept between attempts. Running out ends the run.
+   Every attempt earns chaos (effort plus damage dealt); a first clear pays 50% extra.
+   **Play** opens the sea picker: start a run at any sea you have reached, and
+   replay cleared seas to farm chaos.
 5. Optional **golden rings** at sea multiply the chaos reward if a crest breaks through them.
 
 ## Architecture
@@ -69,7 +75,10 @@ and arrival time at that city. The generator then:
 
 1. picks the strongest epicenter cells and **delays** them so their crests land together,
 2. verifies this witness solution with a forward simulation,
-3. sets each wall above the best any single quake can reach, and hp to 80% of the witness damage,
+3. plays 8 imperfect sample plans (random spots in the right epicenters, delays
+   lined up from the timeline) and sets walls and hp so a target share of them
+   wins: about 85% on sea 1, falling to 30% by sea 12. Single quakes stay below
+   the wall where that is fair, and the witness always wins,
 4. replays the same placements with all delays at zero and prefers levels
    where that fails, so timing is required.
 

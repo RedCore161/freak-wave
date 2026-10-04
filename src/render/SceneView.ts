@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GRID_H, GRID_W, WAVE_SPEED } from '../sim/constants.ts';
 import { QUAKE_TYPES, type QuakeKind } from '../sim/quakes.ts';
 import { distanceTo } from '../level/terrain.ts';
+import { CITY_MIN_DISTANCE } from '../level/placement.ts';
 import type { LevelData, SpawnArea } from '../level/types.ts';
 import { rampInto } from './palette.ts';
 
@@ -19,6 +20,8 @@ export interface QuakeVisual {
   x: number;
   y: number;
   angle: number;
+  /** 0.1..1: quakes outside epicenters are smaller and dimmer. */
+  power: number;
 }
 
 export interface CityVisualState {
@@ -202,7 +205,7 @@ export class SceneView {
     for (const z of this.zones) this.scene.remove(z.group);
     this.zones = level.zones.map((z) => this.buildZone(z.x, z.y, z.threshold));
 
-    this.setSpawns(spawns);
+    this.setSpawns(spawns, level.cities);
     this.setQuakes([], null);
     this.clearEffects();
     this.updateWater(null, null, null);
@@ -210,8 +213,18 @@ export class SceneView {
     this.camIntro = 0;
   }
 
-  setSpawns(spawns: readonly SpawnArea[]): void {
+  setSpawns(spawns: readonly SpawnArea[], cities: readonly { x: number; y: number }[] = []): void {
     this.spawnGroup.clear();
+    for (const c of cities) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(CITY_MIN_DISTANCE - 0.4, CITY_MIN_DISTANCE, 64).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: 0xff4d6d, transparent: true, opacity: 0.35, depthTest: false }),
+      );
+      ring.renderOrder = 3;
+      ring.position.copy(toWorld(c.x, c.y)).setY(0.2);
+      ring.userData.noGo = true;
+      this.spawnGroup.add(ring);
+    }
     spawns.forEach((s, i) => {
       const g = new THREE.Group();
       g.position.copy(toWorld(s.x, s.y)).setY(0.25);
@@ -402,6 +415,10 @@ export class SceneView {
       // Grid y maps to world z, so a positive cell angle turns clockwise from above.
       mesh.rotation.y = -q.angle;
       mesh.userData.selected = q.id === selectedId;
+      mesh.userData.power = q.power;
+      const gemMat = (mesh.userData.gem as THREE.Mesh).material as THREE.MeshLambertMaterial;
+      gemMat.transparent = q.power < 1;
+      gemMat.opacity = 0.35 + 0.65 * q.power;
     }
     for (const [id, mesh] of this.quakeMeshes) {
       if (seen.has(id)) continue;
@@ -418,12 +435,13 @@ export class SceneView {
     if (!visible) this.selectRing.visible = false;
   }
 
-  setGhost(ghost: { x: number; y: number; kind: QuakeKind; valid: boolean } | null): void {
+  setGhost(ghost: { x: number; y: number; kind: QuakeKind; valid: boolean; power: number } | null): void {
     this.ghost.visible = !!ghost;
     if (!ghost) return;
     const type = QUAKE_TYPES[ghost.kind];
     const gem = this.ghost.userData.gem as THREE.Mesh;
-    gem.scale.setScalar(type.size);
+    gem.scale.setScalar(type.size * (0.55 + 0.45 * ghost.power));
+    this.ghostMat.opacity = 0.2 + 0.45 * ghost.power;
     this.ghostMat.color.set(ghost.valid ? type.color : '#ff3355');
     this.ghost.position.copy(toWorld(ghost.x, ghost.y));
   }
@@ -568,11 +586,13 @@ export class SceneView {
       gem.rotation.y += dt * 0.8;
       const pop = (g.userData.pop as number | undefined) ?? 1;
       const kick = (g.userData.kick as number | undefined) ?? 0;
-      g.scale.setScalar(Math.max(0.01, pop * (g.userData.selected ? 1.2 : 1) * (1 + kick * 0.4)));
+      const power = (g.userData.power as number | undefined) ?? 1;
+      g.scale.setScalar(Math.max(0.01, pop * (0.55 + 0.45 * power) * (g.userData.selected ? 1.2 : 1) * (1 + kick * 0.4)));
     }
     (this.ghost.userData.gem as THREE.Mesh).rotation.y += dt * 0.8;
 
     this.spawnGroup.children.forEach((g) => {
+      if (g.userData.noGo) return;
       const ring = g.children[1] as THREE.Mesh;
       const m = ring.material as THREE.MeshBasicMaterial;
       m.opacity = 0.55 + 0.35 * Math.sin(this.clock * 2.4 + g.userData.phase);

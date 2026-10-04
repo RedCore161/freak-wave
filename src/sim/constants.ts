@@ -14,6 +14,8 @@ export const RECIP_STEPS = Math.round(15 / DT);
 export const SPONGE = 10;
 /** Quakes may only be placed inside spawn areas of this radius. */
 export const SPAWN_RADIUS = 9;
+/** Quakes may not be placed this close to the map edge. */
+export const EDGE_MARGIN = 3;
 /** Minimum distance between two quakes. */
 export const QUAKE_MIN_SEPARATION = 5;
 /** Water within this radius of a city's centre counts as its shoreline. */

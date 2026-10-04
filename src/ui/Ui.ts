@@ -391,12 +391,14 @@ export class Ui {
   }
 
   private panelDelay = h('span', { class: 'delay' });
+  private panelPower = h('span', { class: 'power', title: 'Quake power' });
   private panelRotate = h('button', { class: 'btn small ghost icon-btn', title: 'Rotate', onclick: () => this.onRotate() });
 
   private buildQuakePanel(): void {
     this.panelRotate.innerHTML =
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/></svg>';
     this.quakePanel.append(
+      this.panelPower,
       h('button', { class: 'btn small ghost', onclick: () => this.onDelay(-1) }, '−'),
       this.panelDelay,
       h('button', { class: 'btn small ghost', onclick: () => this.onDelay(1) }, '+'),
@@ -406,15 +408,21 @@ export class Ui {
     this.quakePanel.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
 
-  setQuakePanel(d: { x: number; y: number; delay: number; rotatable: boolean } | null): void {
+  setQuakePanel(d: { x: number; y: number; delay: number; rotatable: boolean; power: number } | null): void {
     this.quakePanel.hidden = !d;
     if (!d) return;
     // Keep the panel on screen; it is centred on x via CSS translate.
     const half = this.quakePanel.offsetWidth / 2 + 8;
     const x = Math.max(half, Math.min(window.innerWidth - half, d.x));
-    this.quakePanel.style.transform = `translate(${x}px, ${d.y + 24}px)`;
+    // Flip above the quake when the panel would run into the dock.
+    const below = d.y + 24;
+    const dockTop = this.dock.getBoundingClientRect().top;
+    const y = below + this.quakePanel.offsetHeight > dockTop - 8 ? d.y - 34 - this.quakePanel.offsetHeight : below;
+    this.quakePanel.style.transform = `translate(${x}px, ${y}px)`;
     this.panelRotate.hidden = !d.rotatable;
     this.panelDelay.textContent = `fires ${d.delay.toFixed(2)}s`;
+    this.panelPower.textContent = `${Math.round(d.power * 100)}%`;
+    this.panelPower.classList.toggle('weak', d.power < 1);
   }
 
   // ---------------------------------------------------------------- overlays
@@ -464,12 +472,12 @@ export class Ui {
         { class: 'panel-actions' },
         h('button', { class: 'btn ghost', onclick: a.tutorial }, 'How to play'),
         h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
-        h('button', { class: 'btn primary', onclick: a.start }, 'Start run'),
+        h('button', { class: 'btn primary', onclick: a.start }, 'Play'),
       ),
       h(
         'ul',
         { class: 'howto' },
-        h('li', {}, 'Quakes can only start inside the green epicenters.'),
+        h('li', {}, 'Quakes are strongest inside the green epicenters and fade outside them.'),
         h('li', {}, 'Drag quakes along the timeline to delay them, so their crests reach a city together.'),
         h('li', {}, 'Every crest that tops a sea wall damages the city. Back-to-back crests combo.'),
         h('li', {}, 'Ruin every city within 3 attempts. Golden rings multiply your chaos.'),
@@ -544,6 +552,37 @@ export class Ui {
         !last && h('button', { class: 'btn ghost', onclick: done }, 'Skip'),
         start > 0 && h('button', { class: 'btn ghost', onclick: () => this.showTutorial(done, start - 1) }, 'Back'),
         h('button', { class: 'btn primary', onclick: () => (last ? done() : this.showTutorial(done, start + 1)) }, last ? 'Let\u2019s go' : 'Next'),
+      ),
+    );
+  }
+
+  showLevelSelect(
+    seas: { index: number; name: string; unlocked: boolean; cleared: boolean }[],
+    a: { pick: (index: number) => void; back: () => void },
+  ): void {
+    const furthest = Math.max(0, ...seas.filter((s) => s.unlocked).map((s) => s.index));
+    this.showPanel(
+      'levels-panel',
+      h('div', { class: 'skills-head' }, h('h2', {}, 'Choose a sea'), h('button', { class: 'btn ghost', onclick: a.back }, 'Back')),
+      h('p', { class: 'muted' }, 'A run starts at the sea you pick and carries on from there. Replay cleared seas to farm chaos.'),
+      h(
+        'div',
+        { class: 'level-grid' },
+        ...seas.map((s, i) => {
+          const card = h(
+            'button',
+            {
+              class: `level-card${s.cleared ? ' cleared' : ''}${s.index === furthest ? ' next' : ''}`,
+              style: `animation-delay: ${Math.min(i, 16) * 0.03}s`,
+              onclick: () => a.pick(s.index),
+            },
+            h('span', { class: 'level-num' }, String(s.index + 1)),
+            h('span', { class: 'level-name' }, s.unlocked ? s.name : 'Locked'),
+            h('span', { class: 'level-state' }, s.cleared ? 'Cleared' : s.unlocked ? 'New' : ''),
+          );
+          if (!s.unlocked) card.setAttribute('disabled', '');
+          return card;
+        }),
       ),
     );
   }

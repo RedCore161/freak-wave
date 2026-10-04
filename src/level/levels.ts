@@ -23,6 +23,11 @@ function loadManifest(): Promise<HandmadeEntry[]> {
   return manifest;
 }
 
+/** Names of the hand-made seas, in campaign order. */
+export async function campaignNames(): Promise<string[]> {
+  return (await loadManifest()).map((e) => e.name);
+}
+
 async function loadMap(url: string): Promise<MapMarkers> {
   const img = new Image();
   img.src = url;

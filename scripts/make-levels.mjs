@@ -69,7 +69,7 @@ const levels = [
     quakes: ['small', 'medium'],
     land: union(minus(rect(40, 95, 280, 105), rect(150, 90, 172, 110)), rect(100, 165, 220, 200)),
     cities: [[160, 164, 1]],
-    spawns: [[118, 40, 16], [214, 54, 16]],
+    spawns: [[132, 38, 16], [194, 50, 16]],
     zones: [[161, 72]],
   },
   {

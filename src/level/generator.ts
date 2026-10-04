@@ -12,11 +12,12 @@ import {
   SPONGE,
   ZONE_RADIUS,
 } from '../sim/constants.ts';
+import { waterDistanceField } from '../sim/arrival.ts';
 import { replayDamage, shoreHeight, type CitySpec } from '../sim/cities.ts';
-import { buildWaveform, NO_MODS, type QuakeKind } from '../sim/quakes.ts';
+import { buildWaveform, crestArrival, NO_MODS, type QuakeKind } from '../sim/quakes.ts';
 import { makeRng, pick } from '../sim/rng.ts';
 import { WaveSim } from '../sim/WaveSim.ts';
-import { placementProblem } from './placement.ts';
+import { placementProblem, quakePower } from './placement.ts';
 import { distanceTo, generateIslands } from './terrain.ts';
 import type { ChaosZone, LevelData, LevelRequest, QuakePlacement, SpawnArea } from './types.ts';
 
@@ -39,8 +40,12 @@ const GOOD_TIMING_RATIO = 0.7;
 const CITY_SEPARATION = 30;
 const SPAWN_CITY_DISTANCE = 38;
 const MIN_WALL = 1.5;
-/** Share of the witness damage needed to ruin a city. */
-const HP_FRACTION = 0.8;
+/** HP never exceeds this share of the witness damage, so the solution always wins. */
+const HP_FRACTION = 0.85;
+/** Imperfect plans played per level to calibrate walls and hp. */
+const SAMPLE_PLANS = 8;
+/** Single quakes stay below the wall by this factor (unless that makes the level unfair). */
+const WALL_OVER_SINGLE = 1.05;
 /** Cities that would fall to a sliver of overflow are rejected as trivial. */
 const MIN_WITNESS_DAMAGE = 2;
 export const ZONE_MULT = 1.5;
@@ -55,6 +60,20 @@ export function cityLevels(index: number, rng: () => number): number[] {
   if (index < fixed.length) return fixed[index];
   const options = [[1, 1, 2], [3, 1], [2, 3], [1, 1, 1], [3, 2]];
   return pick(rng, options);
+}
+
+/**
+ * Share of reasonable-but-imperfect plans that should win: quakes anywhere
+ * inside the right epicenters, delays lined up from the timeline estimates.
+ * Generous at first, tighter later.
+ */
+export function winShare(index: number): number {
+  return Math.max(0.3, 0.85 - index * 0.05);
+}
+
+function quantile(sorted: readonly number[], q: number): number {
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1) + 0.5)));
+  return sorted[i];
 }
 
 function spawnCount(index: number): number {
@@ -120,8 +139,10 @@ export function generateLevel(req: LevelRequest): LevelData {
   }
 
   let best: Candidate | null = null;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const relaxed = attempt === MAX_ATTEMPTS - 1 && !best;
+  // A fixed map only varies in quake types (and not at all if those are fixed too).
+  const attempts = fixed ? (req.quakes ? 2 : 4) : MAX_ATTEMPTS;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const relaxed = attempt === attempts - 1 && !best;
     const layout = fixed ?? randomLayout(rng, req.index, land, coast);
     if (!layout) continue;
     const c = tryBuild(rng, req.index, land, layout, relaxed, req.quakes);
@@ -182,7 +203,8 @@ function tryBuild(
     }
     return byKind;
   });
-  const spawnCells = cellsInSpawns(land, spawns);
+  const spawnCells = cellsInSpawns(land, spawns, sites);
+  const reach = reachableCells(land, spawns, sites);
   if (spawnCells.length === 0) return null;
 
   // Witness: strongest spawn cell per quake, then delays that line crests up.
@@ -222,6 +244,9 @@ function tryBuild(
 
   const timed = forwardSeries(land, sites, witness, true);
   const flat = forwardSeries(land, sites, witness, false);
+  const samples = samplePlans(rng, land, sites, spawns, witness, sizes);
+  // With several cities every one must fall, so each needs a higher share.
+  const share = Math.pow(winShare(index), 1 / sites.length);
 
   const cities: CitySpec[] = [];
   let timingRatio = Infinity;
@@ -229,16 +254,30 @@ function tryBuild(
     const crest = Math.max(...timed.series[c]);
     // Best a single quake of any available type can do from any spawn cell.
     let single = 0;
-    for (const r of responses[c].values()) for (const cell of spawnCells) single = Math.max(single, r.peak[cell]);
-    let wall = Math.max(MIN_WALL, single * 1.1, crest * 0.5);
-    if (wall >= crest * 0.92) {
+    // Quakes outside epicenters are allowed but weaker, so weigh every legal cell by its power.
+    for (const r of responses[c].values()) reach.cells.forEach((cell, i) => (single = Math.max(single, r.peak[cell] * reach.power[i])));
+    // Crest that the target share of imperfect plans reaches.
+    const sampleCrests = samples.map((sm) => Math.max(...sm[c])).sort((a, b) => a - b);
+    const typical = quantile(sampleCrests, 1 - share);
+    let wall = Math.min(Math.max(MIN_WALL, single * WALL_OVER_SINGLE), typical * 0.85, crest * 0.9);
+    if (wall < crest * 0.35) {
       if (!relaxed) return null;
-      wall = Math.max(0.5, crest * 0.7);
     }
+    wall = Math.max(0.5, wall);
     const damage = replayDamage(timed.series[c], wall);
     if (damage < (relaxed ? 0.3 : MIN_WITNESS_DAMAGE)) return null;
-    const hp = Math.round(damage * HP_FRACTION * 10) / 10;
-    timingRatio = Math.min(timingRatio, replayDamage(flat.series[c], wall) / hp);
+    const sampleDamage = samples.map((sm) => replayDamage(sm[c], wall)).sort((a, b) => a - b);
+    const target = quantile(sampleDamage, 1 - share) * 0.95;
+    let hp = Math.max(0.8, Math.min(damage * HP_FRACTION, target));
+    const flatDamage = replayDamage(flat.series[c], wall);
+    // From the third sea on, firing everything at once should not be enough,
+    // as long as that keeps most of the intended share of fair plans winning.
+    if (index >= 2) {
+      const fairCap = quantile(sampleDamage, 1 - share * 0.6) * 0.95;
+      hp = Math.max(hp, Math.min(flatDamage * 1.1, damage * HP_FRACTION, fairCap));
+    }
+    hp = Math.round(hp * 10) / 10;
+    timingRatio = Math.min(timingRatio, flatDamage / hp);
     cities.push({
       name: `${pick(rng, CITY_A)} ${pick(rng, CITY_B)}`,
       x: sites[c].x,
@@ -250,6 +289,52 @@ function tryBuild(
     });
   }
   return { cities, spawns, witness, inventory, timingRatio, peakField: timed.peak };
+}
+
+/**
+ * Plays imperfect versions of the witness: each quake at a random spot in the
+ * same epicenter, delays set by lining up the timeline's crest estimates per
+ * city. Returns each plan's shoreline series per city.
+ */
+function samplePlans(
+  rng: () => number,
+  land: Uint8Array,
+  sites: readonly Site[],
+  spawns: readonly SpawnArea[],
+  witness: readonly QuakePlacement[],
+  sizes: readonly number[],
+): Float32Array[][] {
+  const out: Float32Array[][] = [];
+  for (let n = 0; n < SAMPLE_PLANS; n++) {
+    const plan = witness.map((w) => {
+      const sp = spawns.find((s) => Math.hypot(s.x - w.x, s.y - w.y) <= s.r + 0.5);
+      let x = w.x;
+      let y = w.y;
+      for (let k = 0; sp && k < 40; k++) {
+        const a = rng() * Math.PI * 2;
+        const r = Math.sqrt(rng()) * sp.r;
+        const nx = sp.x + Math.cos(a) * r;
+        const ny = sp.y + Math.sin(a) * r;
+        if (!land[Math.round(ny) * GRID_W + Math.round(nx)]) {
+          x = nx;
+          y = ny;
+          break;
+        }
+      }
+      return { ...w, x, y };
+    });
+    let k = 0;
+    sizes.forEach((size, c) => {
+      const group = plan.slice(k, (k += size));
+      const arrive = group.map((q) => crestArrival(q.kind, NO_MODS, waterDistanceField(land, q.x, q.y)[sites[c].mouth]));
+      const latest = Math.max(...arrive.filter(Number.isFinite));
+      group.forEach((q, i) => {
+        q.delay = Number.isFinite(arrive[i]) ? Math.min(BASE_MAX_FUSE, Math.round((latest - arrive[i]) / BASE_FUSE_STEP) * BASE_FUSE_STEP) : 0;
+      });
+    });
+    out.push(forwardSeries(land, sites, plan, true).series);
+  }
+  return out;
 }
 
 function sameSpawn(spawns: readonly SpawnArea[], a: number, b: number): boolean {
@@ -342,14 +427,29 @@ export function pickSpawns(
   return out.length === count ? out : null;
 }
 
-function cellsInSpawns(land: Uint8Array, spawns: readonly SpawnArea[]): number[] {
+/** Legal cells at full power (inside an epicenter). */
+function cellsInSpawns(land: Uint8Array, spawns: readonly SpawnArea[], cities: readonly { x: number; y: number }[]): number[] {
   const out: number[] = [];
   for (let y = 0; y < GRID_H; y++) {
     for (let x = 0; x < GRID_W; x++) {
-      if (!placementProblem(land, x, y, spawns, [])) out.push(y * GRID_W + x);
+      if (quakePower(spawns, x, y) >= 1 && !placementProblem(land, x, y, cities, [])) out.push(y * GRID_W + x);
     }
   }
   return out;
+}
+
+/** Every legal cell with the power a quake would have there. */
+function reachableCells(land: Uint8Array, spawns: readonly SpawnArea[], cities: readonly { x: number; y: number }[]) {
+  const cells: number[] = [];
+  const power: number[] = [];
+  for (let y = 0; y < GRID_H; y++) {
+    for (let x = 0; x < GRID_W; x++) {
+      if (placementProblem(land, x, y, cities, [])) continue;
+      cells.push(y * GRID_W + x);
+      power.push(quakePower(spawns, x, y));
+    }
+  }
+  return { cells, power };
 }
 
 function peakAround(field: Float32Array, x: number, y: number): number {

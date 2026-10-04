@@ -24,8 +24,8 @@ const RINGS = (x: number, y: number, color: string, delay = 0) =>
 
 export const TUTORIAL_SLIDES: Slide[] = [
   {
-    title: 'Start in a green epicenter',
-    body: 'Pick a quake in the tray, then tap inside a green circle. Quakes can only start there. Drag a quake to move it.',
+    title: 'Use the green epicenters',
+    body: 'Pick a quake in the tray and tap the sea. Inside a green circle a quake has full power; the further outside, the weaker it gets. Never too close to a city.',
     svg: `${SEA}
       <circle cx="80" cy="72" r="38" fill="#5dff9a" fill-opacity=".12" stroke="#5dff9a" stroke-width="3"/>
       ${GEM(80, 72, '#7fd4ff', 'tut-pop')}
