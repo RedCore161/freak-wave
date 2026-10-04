@@ -33,6 +33,8 @@ Tools:
 1. Pick a quake in the tray and tap the sea. Inside a **green epicenter** a quake has
    full power; outside, its power fades with distance (down to 10%). Quakes can
    never be placed within 22 cells of a city (red ring). Drag to move.
+   **At most 3 quakes per sea.** Spare quakes are merge material: three of a kind
+   merge into one of the next size (Tremor → Quake → Megaquake). Clear undoes merges.
 2. Each quake appears on the **timeline**. Drag its diamond to delay it. Under
    each city, coloured marks show when each quake's first big crest will
    arrive. Line the marks up so the crests stack.
@@ -73,7 +75,9 @@ produces at city C equals what a quake at C produces at P. One reverse
 simulation per city and quake type gives every epicenter cell's crest height
 and arrival time at that city. The generator then:
 
-1. picks the strongest epicenter cells and **delays** them so their crests land together,
+1. builds a 2–3 quake solution: one city gets all quakes crest-aligned; with two
+   cities the middle quake is shared and each city gets one timed partner. It picks
+   strong epicenter cells and **delays** them so the crests land together,
 2. verifies this witness solution with a forward simulation,
 3. plays 8 imperfect sample plans (random spots in the right epicenters, delays
    lined up from the timeline) and sets walls and hp so a target share of them

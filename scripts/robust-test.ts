@@ -9,6 +9,7 @@ import { buildWaveform, crestArrival, NO_MODS } from '../src/sim/quakes.ts';
 import { makeRng } from '../src/sim/rng.ts';
 import { WaveSim } from '../src/sim/WaveSim.ts';
 import type { LevelData } from '../src/level/types.ts';
+import { alignDelays } from '../src/level/plan.ts';
 import { loadCampaign } from './lib.ts';
 
 const TRIALS = Number(process.argv[2] ?? 12);
@@ -39,14 +40,9 @@ function trial(level: LevelData, rng: () => number): boolean {
     }
     return { ...w, x, y, dist: waterDistanceField(level.land, x, y) };
   });
-  // Delays: line up estimated arrivals within each city's group, as on the timeline.
-  let k = 0;
-  for (let c = 0; c < level.cities.length; c++) {
-    const group = quakes.slice(k, (k += level.cities[c].level + 1));
-    const arr = group.map((q) => crestArrival(q.kind, NO_MODS, q.dist[mouths[c]]));
-    const latest = Math.max(...arr);
-    group.forEach((q, i) => (q.delay = Math.round((latest - arr[i]) / 0.1) * 0.1));
-  }
+  // Delays: line up estimated arrivals per city group, as on the timeline.
+  const arrival = quakes.map((q) => mouths.map((m) => crestArrival(q.kind, NO_MODS, q.dist[m])));
+  alignDelays(arrival, level.groups, 6, 0.1).forEach((d, i) => (quakes[i].delay = d));
   const sim = new WaveSim(level.land);
   for (const q of quakes) sim.addSource({ x: q.x, y: q.y, waveform: buildWaveform(q.kind, NO_MODS), startStep: Math.round(q.delay / DT) });
   const meters = level.cities.map((c) => new CityMeter(c));

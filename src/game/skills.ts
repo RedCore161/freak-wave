@@ -68,16 +68,16 @@ const S = (
 // power, so the timing puzzle never dissolves.
 export const SKILLS: readonly SkillDef[] = [
   // Arsenal: more and new quakes.
-  S('arsenal', 0.5, 0, 'tremor1', 'Spare Tremor', 'tremor', 12, [], '+1 Tremor every sea.', (l) => l.bonusQuakes.push('small')),
-  S('arsenal', 0, 1, 'tremor2', 'Tremor Cache', 'tremor', 28, ['tremor1'], '+1 Tremor every sea.', (l) => l.bonusQuakes.push('small')),
-  S('arsenal', 1, 1, 'fault1', 'Fault Line', 'quake', 35, ['tremor1'], '+1 Quake every sea.', (l) => l.bonusQuakes.push('medium')),
-  S('arsenal', 0, 2, 'pulse1', 'Pulsar', 'pulse', 50, ['tremor2'], 'Unlock the Pulsar: a long train of small waves, made for combos. +1 per sea.', (l) => l.bonusQuakes.push('pulse')),
-  S('arsenal', 1, 2, 'fault2', 'Deep Fault', 'quake', 60, ['fault1'], '+1 Quake every sea.', (l) => l.bonusQuakes.push('medium')),
-  S('arsenal', 0, 3, 'pulse2', 'Pulsar Array', 'pulse', 90, ['pulse1'], '+1 Pulsar every sea.', (l) => l.bonusQuakes.push('pulse')),
-  S('arsenal', 1, 3, 'rift1', 'Rift', 'rift', 80, ['fault2'], 'Unlock the Rift: a fault line that fires its waves sideways. Rotate it to aim. +1 per sea.', (l) => l.bonusQuakes.push('rift')),
-  S('arsenal', 0, 4, 'rift2', 'Rift Swarm', 'rift', 140, ['rift1'], '+1 Rift every sea.', (l) => l.bonusQuakes.push('rift')),
-  S('arsenal', 1, 4, 'mega1', 'Megathrust', 'mega', 120, ['rift1'], '+1 Megaquake every sea.', (l) => l.bonusQuakes.push('large')),
-  S('arsenal', 0.5, 5, 'mega2', 'Supercontinent', 'mega', 220, ['mega1'], '+1 Megaquake every sea.', (l) => l.bonusQuakes.push('large')),
+  S('arsenal', 0.5, 0, 'tremor1', 'Spare Tremor', 'tremor', 45, [], '+1 Tremor every sea.', (l) => l.bonusQuakes.push('small')),
+  S('arsenal', 0, 1, 'tremor2', 'Tremor Cache', 'tremor', 110, ['tremor1'], '+1 Tremor every sea.', (l) => l.bonusQuakes.push('small')),
+  S('arsenal', 1, 1, 'fault1', 'Fault Line', 'quake', 80, ['tremor1'], '+1 Quake every sea.', (l) => l.bonusQuakes.push('medium')),
+  S('arsenal', 0, 2, 'pulse1', 'Pulsar', 'pulse', 120, ['tremor2'], 'Unlock the Pulsar: a long train of small waves, made for combos. +1 per sea.', (l) => l.bonusQuakes.push('pulse')),
+  S('arsenal', 1, 2, 'fault2', 'Deep Fault', 'quake', 140, ['fault1'], '+1 Quake every sea.', (l) => l.bonusQuakes.push('medium')),
+  S('arsenal', 0, 3, 'pulse2', 'Pulsar Array', 'pulse', 180, ['pulse1'], '+1 Pulsar every sea.', (l) => l.bonusQuakes.push('pulse')),
+  S('arsenal', 1, 3, 'rift1', 'Rift', 'rift', 160, ['fault2'], 'Unlock the Rift: a fault line that fires its waves sideways. Rotate it to aim. +1 per sea.', (l) => l.bonusQuakes.push('rift')),
+  S('arsenal', 0, 4, 'rift2', 'Rift Swarm', 'rift', 240, ['rift1'], '+1 Rift every sea.', (l) => l.bonusQuakes.push('rift')),
+  S('arsenal', 1, 4, 'mega1', 'Megathrust', 'mega', 220, ['rift1'], '+1 Megaquake every sea.', (l) => l.bonusQuakes.push('large')),
+  S('arsenal', 0.5, 5, 'mega2', 'Supercontinent', 'mega', 340, ['mega1'], '+1 Megaquake every sea.', (l) => l.bonusQuakes.push('large')),
 
   // Power: shape the waves.
   S('power', 2.5, 0, 'res1', 'Resonance', 'wave', 15, [], 'All waves 8% taller.', (l) => (l.mods.ampMul *= 1.08)),

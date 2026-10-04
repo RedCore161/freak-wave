@@ -1,5 +1,8 @@
 // Writes the hand-made campaign maps as RGBA PNGs plus levels.json.
 //
+// Each level lists the quake types of its intended solution (at most 3, the
+// per-sea limit) and optionally a different inventory to merge from.
+//
 // Map legend (any image editor works; keep a 16:10 aspect ratio):
 //   transparent        water
 //   any opaque colour  land
@@ -75,8 +78,9 @@ const levels = [
   {
     file: '04-harbor-echo.png',
     name: 'Harbor Echo',
-    hint: 'The harbor walls funnel and reflect waves toward the city at its far end.',
-    quakes: ['small', 'medium', 'medium'],
+    hint: 'Only three quakes fit, but you have five Tremors. Merge three of them into a Quake.',
+    quakes: ['medium', 'small', 'small'],
+    inventory: ['small', 'small', 'small', 'small', 'small'],
     land: minus(union(rect(215, 20, 320, 180), ellipse(218, 100, 10, 70, 2)), rect(205, 86, 272, 114)),
     cities: [[273, 100, 2]],
     spawns: [[60, 48, 18], [86, 158, 18], [150, 34, 14]],
@@ -85,8 +89,8 @@ const levels = [
   {
     file: '05-twin-towns.png',
     name: 'Twin Towns',
-    hint: 'Two cities, two plans. Some quakes can serve both if you time them well.',
-    quakes: ['small', 'medium', 'small', 'medium'],
+    hint: 'Two cities, three quakes: the middle one must serve both. Time a partner for each city.',
+    quakes: ['medium', 'medium', 'small'],
     land: union(ellipse(75, 110, 30, 36, 5), ellipse(245, 90, 28, 40, 6)),
     cities: [[104, 110, 1], [218, 90, 1]],
     spawns: [[150, 32, 16], [176, 168, 16]],
@@ -113,7 +117,8 @@ const levels = [
     file: '07-the-strait.png',
     name: 'The Strait',
     hint: 'A narrow channel guides waves between the two coasts.',
-    quakes: ['small', 'medium', 'medium', 'small'],
+    quakes: ['small', 'medium', 'small'],
+    inventory: ['small', 'small', 'small', 'small', 'medium'],
     land: union(rect(100, 20, 220, 80), rect(100, 120, 220, 182)),
     cities: [[160, 79, 1], [205, 121, 1]],
     spawns: [[44, 100, 16], [282, 100, 14], [58, 40, 13]],
@@ -132,8 +137,9 @@ const levels = [
   {
     file: '09-crescent-lagoon.png',
     name: 'Crescent Lagoon',
-    hint: 'The lagoon opens to the east. Waves from the west must find a way around.',
+    hint: 'The lagoon opens to the east. Seven Tremors: merge wisely.',
     quakes: ['medium', 'medium', 'small'],
+    inventory: ['small', 'small', 'small', 'small', 'small', 'small', 'small'],
     land: minus(ellipse(170, 100, 72, 62, 0.5), ellipse(197, 100, 60, 48, 0.5)),
     cities: [[136, 100, 2]],
     spawns: [[282, 58, 14], [282, 146, 14], [40, 100, 16]],
@@ -142,20 +148,21 @@ const levels = [
   {
     file: '10-fjord.png',
     name: 'The Fjord',
-    hint: 'Only waves that enter the fjord mouth reach the city. Chain crests for combos.',
-    quakes: ['medium', 'medium', 'small', 'small'],
+    hint: 'Only waves that enter the fjord mouth reach the city. Merge three Quakes into a Megaquake.',
+    quakes: ['large', 'medium', 'small'],
+    inventory: ['medium', 'medium', 'medium', 'medium', 'small'],
     land: minus(union(rect(24, 110, 232, 200), rect(0, 24, 90, 200)), rect(110, 128, 240, 156)),
     cities: [[109, 142, 3]],
     spawns: [[282, 142, 14], [200, 58, 16], [128, 46, 14]],
     zones: [[260, 100]],
   },
   {
-    file: '11-three-crowns.png',
-    name: 'Three Crowns',
-    hint: 'Three cities, three timings. Plan one at a time, then check for overlap.',
-    quakes: ['small', 'medium', 'medium', 'medium', 'small', 'small', 'medium'],
+    file: '11-crown-isles.png',
+    name: 'Crown Isles',
+    hint: 'Two cities on two islands. One quake has to be timed for both.',
+    quakes: ['medium', 'medium', 'medium'],
     land: union(ellipse(72, 58, 22, 16, 1), ellipse(160, 145, 34, 22, 2), ellipse(248, 58, 22, 16, 3)),
-    cities: [[72, 74, 1], [160, 123, 2], [248, 74, 1]],
+    cities: [[72, 74, 1], [160, 123, 2]],
     spawns: [[160, 38, 16], [40, 150, 14], [284, 150, 14]],
     zones: [[160, 84]],
   },
@@ -163,7 +170,8 @@ const levels = [
     file: '12-maelstrom.png',
     name: 'Maelstrom',
     hint: 'The ring opens to the east. Everything that gets inside echoes around.',
-    quakes: ['medium', 'medium', 'medium', 'small'],
+    quakes: ['large', 'medium', 'small'],
+    inventory: ['medium', 'medium', 'medium', 'small', 'small', 'small', 'small'],
     land: ring(160, 100, 45, 68, 0, 0.35),
     cities: [[114, 100, 3]],
     spawns: [[42, 40, 14], [42, 160, 14], [284, 100, 14]],
@@ -238,7 +246,7 @@ for (const level of levels) writeFileSync(`public/levels/${level.file}`, png(ren
 writeFileSync(
   'public/levels/levels.json',
   JSON.stringify(
-    levels.map((l) => ({ name: l.name, image: l.file, quakes: l.quakes, hint: l.hint })),
+    levels.map((l) => ({ name: l.name, image: l.file, quakes: l.quakes, inventory: l.inventory, hint: l.hint })),
     null,
     2,
   ) + '\n',

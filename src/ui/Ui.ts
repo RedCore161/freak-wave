@@ -25,7 +25,9 @@ const svgNs = 'http://www.w3.org/2000/svg';
 const QUAKE_ICON: Record<QuakeKind, IconId> = { small: 'tremor', medium: 'quake', large: 'mega', rift: 'rift', pulse: 'pulse' };
 
 export interface TrayData {
-  kinds: { kind: QuakeKind; left: number; total: number }[];
+  kinds: { kind: QuakeKind; left: number; total: number; mergeInto: QuakeKind | null }[];
+  placed: number;
+  maxPlaced: number;
   selected: QuakeKind | null;
   canStart: boolean;
   canClear: boolean;
@@ -92,6 +94,7 @@ export class Ui {
   onSpeed: () => void = () => {};
   onMute: () => void = () => {};
   onSelectKind: (kind: QuakeKind) => void = () => {};
+  onMerge: (kind: QuakeKind) => void = () => {};
   onStart: () => void = () => {};
   onClear: () => void = () => {};
   onOracle: () => void = () => {};
@@ -130,6 +133,7 @@ export class Ui {
   private tlDrag: { id: number; pointerId: number } | null = null;
   private skillFocus: string | null = null;
   private skillScroll = { left: 0, top: 0 };
+  private lastSkillClick = { id: '', at: 0 };
   private hideTimer = 0;
 
   constructor(root: HTMLElement) {
@@ -214,7 +218,7 @@ export class Ui {
     }
     const cards = d.kinds.map((k) => {
       const type = QUAKE_TYPES[k.kind];
-      return h(
+      const card = h(
         'button',
         {
           class: `quake-card${d.selected === k.kind ? ' selected' : ''}${k.left === 0 ? ' spent' : ''}`,
@@ -226,7 +230,26 @@ export class Ui {
         h('span', { class: 'quake-name' }, type.name),
         h('span', { class: 'quake-count' }, `${k.left}/${k.total}`),
       );
+      if (!k.mergeInto) return card;
+      const into = QUAKE_TYPES[k.mergeInto];
+      const merge = h(
+        'button',
+        {
+          class: 'merge-btn',
+          style: `--qc: ${into.color}`,
+          title: `Merge 3 ${type.name}s into 1 ${into.name}`,
+          onclick: () => this.onMerge(k.kind),
+        },
+        '3 → 1 ',
+        iconEl(QUAKE_ICON[k.mergeInto], 14),
+      );
+      return h('div', { class: 'card-wrap' }, card, merge);
     });
+    const slots = h(
+      'div',
+      { class: `slots${d.placed >= d.maxPlaced ? ' full' : ''}`, title: 'Quakes placed this sea' },
+      ...Array.from({ length: d.maxPlaced }, (_, i) => h('span', { class: i < d.placed ? 'on' : '' })),
+    );
     const actions: HTMLElement[] = [];
     if (d.oracles > 0) {
       actions.push(h('button', { class: 'btn ghost oracle', onclick: () => this.onOracle(), title: 'Oracle: preview damage' }, iconEl('eye', 16), `${d.oracles}`));
@@ -236,7 +259,7 @@ export class Ui {
     const start = h('button', { class: 'btn primary', onclick: () => this.onStart() }, 'Unleash');
     if (!d.canStart) start.setAttribute('disabled', '');
     actions.push(clear, start);
-    this.tray.replaceChildren(h('div', { class: 'cards' }, ...cards), h('div', { class: 'actions' }, ...actions));
+    this.tray.replaceChildren(h('div', { class: 'cards' }, slots, ...cards), h('div', { class: 'actions' }, ...actions));
   }
 
   // ---------------------------------------------------------------- timeline
@@ -721,7 +744,17 @@ export class Ui {
           class: `skill ${state}${this.skillFocus === s.id ? ' focus' : ''}${justBought === s.id ? ' bought' : ''}`,
           style: `left: ${p.x}px; top: ${p.y}px; --bc: ${color}`,
           onclick: () => {
+            // A second click on the same skill within a moment buys it. (The tree
+            // re-renders on every click, so native dblclick never fires.)
+            const now = performance.now();
+            const again = this.lastSkillClick.id === s.id && now - this.lastSkillClick.at < 450;
+            this.lastSkillClick = { id: s.id, at: now };
             this.skillFocus = s.id;
+            if (again && canBuy(s.id, owned, chaos)) {
+              this.lastSkillClick = { id: '', at: 0 };
+              a.buy(s.id);
+              return;
+            }
             this.showSkills(owned, chaos, a);
           },
         },
@@ -794,7 +827,7 @@ export class Ui {
 
   private skillDetail(owned: ReadonlySet<string>, chaos: number, buy: (id: string) => void): HTMLElement {
     const s = this.skillFocus ? SKILL_BY_ID[this.skillFocus] : undefined;
-    if (!s) return h('div', { class: 'skill-detail muted' }, `${owned.size} of ${SKILLS.length} skills owned. Tap a skill to see what it does.`);
+    if (!s) return h('div', { class: 'skill-detail muted' }, `${owned.size} of ${SKILLS.length} skills owned. Tap a skill to see what it does; double-tap to buy.`);
     const missing = s.requires.filter((r) => !owned.has(r)).map((r) => SKILL_BY_ID[r].name);
     const status = owned.has(s.id)
       ? 'Owned'

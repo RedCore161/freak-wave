@@ -1731,3 +1731,65 @@ body:not(.playing) .labels {
   background: rgba(255, 77, 109, 0.15);
   color: var(--danger);
 }
+
+/* ------------------------------------------------------------ slots and merging */
+
+.slots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 2px;
+}
+
+.slots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+  transition: background 0.2s, transform 0.25s var(--ease-back);
+}
+
+.slots span.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.15);
+}
+
+.slots.full span.on {
+  background: var(--warm);
+  border-color: var(--warm);
+}
+
+.card-wrap {
+  position: relative;
+  display: flex;
+}
+
+.merge-btn {
+  position: absolute;
+  top: -12px;
+  right: -8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--qc);
+  background: #0b2238;
+  color: var(--qc);
+  cursor: pointer;
+  animation: merge-pulse 1.6s ease-in-out infinite;
+}
+
+.merge-btn .icon {
+  color: var(--qc);
+}
+
+@keyframes merge-pulse {
+  50% {
+    box-shadow: 0 0 12px -2px var(--qc);
+  }
+}

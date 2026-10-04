@@ -6,6 +6,7 @@ interface HandmadeEntry {
   name: string;
   image: string;
   quakes?: QuakeKind[];
+  inventory?: QuakeKind[];
   hint?: string;
 }
 
@@ -81,6 +82,7 @@ export class LevelSource {
       req.map = await loadMap(`${import.meta.env.BASE_URL}levels/${entry.image}`);
       req.name = entry.name;
       req.quakes = entry.quakes;
+      req.inventory = entry.inventory;
       req.hint = entry.hint;
     }
     return new Promise<LevelData>((resolve, reject) => {

@@ -37,6 +37,8 @@ export interface LevelData {
   /** A known solution the generator verified (debugging and playtests). */
   witness: QuakePlacement[];
   hint?: string;
+  /** Witness quake indices each city relies on (shared quakes chain two cities). */
+  groups: number[][];
   /** Best city's damage with all delays at zero, over its hp: below 1 means timing is required. */
   timingRatio: number;
 }
@@ -47,8 +49,10 @@ export interface LevelRequest {
   /** Hand-made map (from a PNG with markers); procedural if omitted. */
   map?: MapMarkers;
   name?: string;
-  /** Exact quake types for a hand-made map, in city order. */
+  /** Quake types of the verified solution (2-3) for a hand-made map. */
   quakes?: QuakeKind[];
+  /** What the player is handed, if different (e.g. three Tremors to merge). */
+  inventory?: QuakeKind[];
   /** Short tip shown when the sea starts. */
   hint?: string;
 }

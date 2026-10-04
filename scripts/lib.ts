@@ -35,10 +35,10 @@ export const seedFor = (index: number) => (Math.imul(index + 1, 2654435761) ^ 0x
 export function loadCampaign(only?: number): LevelData[] {
   const entries = JSON.parse(readFileSync('public/levels/levels.json', 'utf8'));
   return entries
-    .map((e: { name: string; image: string; quakes?: string[] }, index: number) => {
+    .map((e: { name: string; image: string; quakes?: string[]; inventory?: string[] }, index: number) => {
       if (only !== undefined && only !== index) return null;
       const { px, w, h } = readPng(`public/levels/${e.image}`);
-      return generateLevel({ index, seed: seedFor(index), map: parseMapImage(px, w, h), name: e.name, quakes: e.quakes as never });
+      return generateLevel({ index, seed: seedFor(index), map: parseMapImage(px, w, h), name: e.name, quakes: e.quakes as never, inventory: e.inventory as never });
     })
     .filter(Boolean);
 }

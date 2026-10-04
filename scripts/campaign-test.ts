@@ -31,18 +31,18 @@ function readPng(path: string) {
 
 const seedFor = (index: number) => (Math.imul(index + 1, 2654435761) ^ 0x5eed) >>> 0;
 const entries = JSON.parse(readFileSync('public/levels/levels.json', 'utf8'));
-entries.forEach((e: { name: string; image: string; quakes?: string[] }, index: number) => {
+entries.forEach((e: { name: string; image: string; quakes?: string[]; inventory?: string[] }, index: number) => {
   const { px, w, h } = readPng(`public/levels/${e.image}`);
   const map = parseMapImage(px, w, h);
   const t0 = performance.now();
   try {
-    const level = generateLevel({ index, seed: seedFor(index), map, name: e.name, quakes: e.quakes as never });
+    const level = generateLevel({ index, seed: seedFor(index), map, name: e.name, quakes: e.quakes as never, inventory: e.inventory as never });
     const ms = performance.now() - t0;
     const cities = level.cities.map((c) => `L${c.level} wall ${c.protection} hp ${c.hp}`).join(' | ');
     console.log(
       `#${index + 1} ${e.name.padEnd(16)} ${ms.toFixed(0).padStart(5)} ms  timing ${level.timingRatio.toFixed(2)}  ` +
         `spawns ${map.spawns.length} zones ${level.zones.map((z) => z.threshold).join(',') || '-'}  ` +
-        `delays ${level.witness.map((q) => q.delay.toFixed(1)).join(',')}  ${cities}`,
+        `inv ${level.inventory.length} delays ${level.witness.map((q) => q.delay.toFixed(1)).join(',')}  ${cities}`,
     );
   } catch (err) {
     console.log(`#${index + 1} ${e.name}: FAILED ${err}`);

@@ -7,6 +7,7 @@ import { WaveSim } from '../sim/WaveSim.ts';
 import { pickSpawns } from '../level/generator.ts';
 import { campaignNames, LevelSource } from '../level/levels.ts';
 import { placementProblem, quakePower } from '../level/placement.ts';
+import { MAX_PLACED, MERGE_COUNT, MERGE_INTO } from '../level/plan.ts';
 import { distanceTo } from '../level/terrain.ts';
 import type { LevelData, SpawnArea } from '../level/types.ts';
 import { SceneView } from '../render/SceneView.ts';
@@ -61,6 +62,8 @@ export class Game {
   private settings: Settings = loadSettings();
   private audio = new Sonifier(this.settings);
   private paused = false;
+  /** Kinds merged this sea, in order (each consumed three into one higher tier). */
+  private merges: QuakeKind[] = [];
   private ghostHint = false;
   private pinned = new Set<number>();
   private lastHitAt: number[] = [];
@@ -134,8 +137,11 @@ export class Game {
       this.refreshPlacing();
     };
     ui.onStart = () => this.startSim();
+    ui.onMerge = (kind) => this.merge(kind);
     ui.onClear = () => {
+      // Clear also undoes merges, so no choice is ever a dead end.
       this.quakes = [];
+      this.merges = [];
       this.selectedId = null;
       this.planChanged();
     };
@@ -292,6 +298,7 @@ export class Game {
       return best;
     });
     this.quakes = [];
+    this.merges = [];
     this.selectedId = null;
     this.attempt = 1;
     this.selectedKind = this.firstAvailableKind();
@@ -332,8 +339,30 @@ export class Game {
 
   // ---------------------------------------------------------------- inventory
 
+  /** Quakes available this sea: the level's, skill bonuses, then merges applied. */
   private inventory(): QuakeKind[] {
-    return [...this.level!.inventory, ...this.lo.bonusQuakes];
+    const pool = [...this.level!.inventory, ...this.lo.bonusQuakes];
+    for (const kind of this.merges) {
+      const next = MERGE_INTO[kind];
+      if (!next || pool.filter((k) => k === kind).length < MERGE_COUNT) continue;
+      for (let n = 0; n < MERGE_COUNT; n++) pool.splice(pool.indexOf(kind), 1);
+      pool.push(next);
+    }
+    return pool;
+  }
+
+  private canMerge(kind: QuakeKind): boolean {
+    return !!MERGE_INTO[kind] && this.remaining(kind) >= MERGE_COUNT;
+  }
+
+  private merge(kind: QuakeKind): void {
+    if (this.phase !== 'placing' || !this.canMerge(kind)) return;
+    this.merges.push(kind);
+    const next = MERGE_INTO[kind]!;
+    this.selectedKind = next;
+    this.audio.arpeggio([392, 523, 784], 0.07, 0.12);
+    this.ui.banner(`3 ${QUAKE_TYPES[kind].name}s → ${QUAKE_TYPES[next].name}`, 'warm');
+    this.planChanged();
   }
 
   private remaining(kind: QuakeKind): number {
@@ -366,6 +395,13 @@ export class Game {
       this.drag = { id: grabbed.id, pointerId: e.pointerId };
       this.view.renderer.domElement.setPointerCapture(e.pointerId);
       this.refreshPlacing();
+      return;
+    }
+    if (this.quakes.length >= MAX_PLACED) {
+      this.selectedId = null;
+      this.refreshPlacing(false);
+      this.ui.setHint(`Only ${MAX_PLACED} quakes per sea. Drag one to move it, or remove it.`, true);
+      this.audio.blip(180, 0.1, 0.1);
       return;
     }
     const kind = this.selectedKind;
@@ -848,10 +884,13 @@ export class Game {
         kind: k,
         left: this.remaining(k),
         total: inv.filter((x) => x === k).length,
+        mergeInto: this.canMerge(k) ? MERGE_INTO[k] : null,
       })),
+      placed: this.quakes.length,
+      maxPlaced: MAX_PLACED,
       selected: this.selectedKind,
       canStart: this.quakes.length > 0,
-      canClear: this.quakes.length > 0,
+      canClear: this.quakes.length > 0 || this.merges.length > 0,
       oracles: this.quakes.length > 0 ? this.oraclesLeft : 0,
     });
     this.ui.setTimeline(this.quakes.length ? this.timelineData() : null);
@@ -891,6 +930,14 @@ export class Game {
   /** Dev/playtest helper: place the generator's verified solution. */
   debugApplyWitness(): void {
     if (this.phase !== 'placing' || !this.level) return;
+    // Merge as needed to field the solution's kinds (Megaquakes first).
+    this.merges = [];
+    this.quakes = [];
+    for (const [kind, from] of [['large', 'medium'], ['medium', 'small']] as const) {
+      while (this.level.witness.filter((w) => w.kind === kind).length > this.inventory().filter((k) => k === kind).length && this.canMerge(from)) {
+        this.merges.push(from);
+      }
+    }
     this.quakes = this.level.witness.map((w) => ({
       id: this.nextQuakeId++,
       kind: w.kind,

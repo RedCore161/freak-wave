@@ -34,6 +34,18 @@ export const TUTORIAL_SLIDES: Slide[] = [
       ${ISLAND(196, 50, 26, 18)}${CITY(186, 42)}`,
   },
   {
+    title: 'Three quakes per sea',
+    body: 'You can place at most three quakes. Spare quakes are not wasted: merge three of a kind into one of the next size, Tremors into a Quake, Quakes into a Megaquake.',
+    svg: `${SEA}
+      ${GEM(44, 50, '#7fd4ff')}${GEM(70, 50, '#7fd4ff')}${GEM(96, 50, '#7fd4ff')}
+      <path d="M120 50 h26 m-8 -7 l8 7 l-8 7" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <rect x="166" y="36" width="28" height="28" rx="4" fill="#ffd166" transform="rotate(45 180 50)" class="tut-pop"/>
+      <g transform="translate(66 104)">
+        <circle cx="0" cy="0" r="7" fill="#5ee6d2"/><circle cx="24" cy="0" r="7" fill="#5ee6d2"/><circle cx="48" cy="0" r="7" fill="none" stroke="#8aa6bf" stroke-width="2"/>
+      </g>
+      <text x="136" y="109" fill="#8aa6bf" font-size="12">2 of 3 placed</text>`,
+  },
+  {
     title: 'Waves travel and fade',
     body: 'Every quake sends out a short train of waves. They bounce off coasts, bend around islands, and get weaker with distance.',
     svg: `${SEA}

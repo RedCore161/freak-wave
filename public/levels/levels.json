@@ -30,22 +30,28 @@
     "name": "Harbor Echo",
     "image": "04-harbor-echo.png",
     "quakes": [
-      "small",
       "medium",
-      "medium"
+      "small",
+      "small"
     ],
-    "hint": "The harbor walls funnel and reflect waves toward the city at its far end."
+    "inventory": [
+      "small",
+      "small",
+      "small",
+      "small",
+      "small"
+    ],
+    "hint": "Only three quakes fit, but you have five Tremors. Merge three of them into a Quake."
   },
   {
     "name": "Twin Towns",
     "image": "05-twin-towns.png",
     "quakes": [
-      "small",
       "medium",
-      "small",
-      "medium"
+      "medium",
+      "small"
     ],
-    "hint": "Two cities, two plans. Some quakes can serve both if you time them well."
+    "hint": "Two cities, three quakes: the middle one must serve both. Time a partner for each city."
   },
   {
     "name": "Scattered Isles",
@@ -63,8 +69,14 @@
     "quakes": [
       "small",
       "medium",
-      "medium",
       "small"
+    ],
+    "inventory": [
+      "small",
+      "small",
+      "small",
+      "small",
+      "medium"
     ],
     "hint": "A narrow channel guides waves between the two coasts."
   },
@@ -86,40 +98,59 @@
       "medium",
       "small"
     ],
-    "hint": "The lagoon opens to the east. Waves from the west must find a way around."
+    "inventory": [
+      "small",
+      "small",
+      "small",
+      "small",
+      "small",
+      "small",
+      "small"
+    ],
+    "hint": "The lagoon opens to the east. Seven Tremors: merge wisely."
   },
   {
     "name": "The Fjord",
     "image": "10-fjord.png",
     "quakes": [
+      "large",
       "medium",
-      "medium",
-      "small",
       "small"
     ],
-    "hint": "Only waves that enter the fjord mouth reach the city. Chain crests for combos."
+    "inventory": [
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "small"
+    ],
+    "hint": "Only waves that enter the fjord mouth reach the city. Merge three Quakes into a Megaquake."
   },
   {
-    "name": "Three Crowns",
-    "image": "11-three-crowns.png",
+    "name": "Crown Isles",
+    "image": "11-crown-isles.png",
     "quakes": [
-      "small",
       "medium",
       "medium",
-      "medium",
-      "small",
-      "small",
       "medium"
     ],
-    "hint": "Three cities, three timings. Plan one at a time, then check for overlap."
+    "hint": "Two cities on two islands. One quake has to be timed for both."
   },
   {
     "name": "Maelstrom",
     "image": "12-maelstrom.png",
     "quakes": [
+      "large",
+      "medium",
+      "small"
+    ],
+    "inventory": [
       "medium",
       "medium",
       "medium",
+      "small",
+      "small",
+      "small",
       "small"
     ],
     "hint": "The ring opens to the east. Everything that gets inside echoes around."

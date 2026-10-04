@@ -28,7 +28,7 @@ await page.click('.title-panel .btn.primary');
 await page.waitForSelector('.tutorial-panel');
 await page.waitForTimeout(900);
 await page.screenshot({ path: `${out}/1b-tutorial.png` });
-for (let i = 0; i < 4; i++) await page.click('.tutorial-panel .btn.primary');
+for (let i = 0; i < 5; i++) await page.click(".tutorial-panel .btn.primary");
 await page.waitForTimeout(900);
 await page.screenshot({ path: `${out}/1c-tutorial-last.png` });
 await page.click('.tutorial-panel .btn.primary');
