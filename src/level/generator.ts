@@ -28,6 +28,10 @@ import type { ChaosZone, LevelData, LevelRequest, QuakePlacement, SpawnArea } fr
 // crests land together. Sea walls are set so no single quake can top them, and
 // the same placements without delays are checked to fall short, which makes
 // timing the heart of the puzzle.
+//
+// Hand-made maps fix land, cities, epicenters and rings; the generator then
+// only chooses quake types and computes walls and hp. Everything is seeded per
+// level, so a sea plays the same in every run.
 
 const MAX_ATTEMPTS = 8;
 /** Accept as soon as the undelayed witness deals at most this share of hp. */
@@ -39,6 +43,7 @@ const MIN_WALL = 1.5;
 const HP_FRACTION = 0.8;
 /** Cities that would fall to a sliver of overflow are rejected as trivial. */
 const MIN_WITNESS_DAMAGE = 2;
+export const ZONE_MULT = 1.5;
 
 export function landFraction(index: number): number {
   return Math.min(0.28, 0.12 + index * 0.02);
@@ -81,6 +86,14 @@ interface Site {
   mouth: number;
 }
 
+interface Layout {
+  sites: Site[];
+  levels: number[];
+  spawns: SpawnArea[];
+  /** Fixed ring positions from a map, or null to choose them. */
+  zoneSpots: { x: number; y: number }[] | null;
+}
+
 interface Candidate {
   cities: CitySpec[];
   spawns: SpawnArea[];
@@ -92,19 +105,31 @@ interface Candidate {
 
 export function generateLevel(req: LevelRequest): LevelData {
   const rng = makeRng(req.seed);
-  const land = req.land ?? generateIslands(rng, landFraction(req.index));
+  const map = req.map;
+  const land = map?.land ?? generateIslands(rng, landFraction(req.index));
   const name = req.name ?? `${pick(rng, NAME_A)} ${pick(rng, NAME_B)}`;
-  const levels = cityLevels(req.index, rng);
   const coast = distanceTo(land, 1, 32);
+
+  let fixed: Layout | null = null;
+  if (map && map.cities.length > 0) {
+    const sites = map.cities.map((c) => siteAt(land, c.x, c.y, 3));
+    if (sites.some((s) => !s)) throw new Error(`${name}: a city marker is not on a coast`);
+    const spawns = map.spawns.length > 0 ? map.spawns : pickSpawns(rng, land, coast, sites as Site[], 3, []);
+    if (!spawns) throw new Error(`${name}: could not place epicenters`);
+    fixed = { sites: sites as Site[], levels: map.cities.map((c) => c.level), spawns, zoneSpots: map.zones };
+  }
 
   let best: Candidate | null = null;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const c = tryBuild(rng, req.index, land, coast, levels);
+    const relaxed = attempt === MAX_ATTEMPTS - 1 && !best;
+    const layout = fixed ?? randomLayout(rng, req.index, land, coast);
+    if (!layout) continue;
+    const c = tryBuild(rng, req.index, land, layout, relaxed, req.quakes);
     if (c && (!best || c.timingRatio < best.timingRatio)) best = c;
     if (best && best.timingRatio <= GOOD_TIMING_RATIO) break;
   }
   if (!best) throw new Error(`Could not generate level ${req.index} (seed ${req.seed})`);
-  const zones = req.index >= 1 ? pickZones(land, coast, best) : [];
+  const zones = fixed ? zonesAt(fixed.zoneSpots ?? [], best) : req.index >= 1 ? pickZones(land, coast, best) : [];
   return {
     index: req.index,
     name,
@@ -116,16 +141,33 @@ export function generateLevel(req: LevelRequest): LevelData {
     inventory: best.inventory,
     witness: best.witness,
     timingRatio: best.timingRatio,
+    hint: req.hint,
   };
 }
 
-function tryBuild(rng: () => number, index: number, land: Uint8Array, coast: Uint8Array, levels: number[]): Candidate | null {
+function randomLayout(rng: () => number, index: number, land: Uint8Array, coast: Uint8Array): Layout | null {
+  const levels = cityLevels(index, rng);
   const sites = pickCitySites(rng, land, levels.length);
   if (!sites) return null;
   const spawns = pickSpawns(rng, land, coast, sites, spawnCount(index), []);
   if (!spawns) return null;
+  return { sites, levels, spawns, zoneSpots: null };
+}
 
-  const groups = levels.map((lvl) => Array.from({ length: lvl + 1 }, () => quakeKindFor(index, rng)));
+function tryBuild(
+  rng: () => number,
+  index: number,
+  land: Uint8Array,
+  layout: Layout,
+  relaxed: boolean,
+  quakes?: QuakeKind[],
+): Candidate | null {
+  const { sites, levels, spawns } = layout;
+  const sizes = levels.map((l) => l + 1);
+  const total = sizes.reduce((a, b) => a + b, 0);
+  // A map may fix the exact quake types; otherwise roll them per group.
+  const fixedKinds = quakes && quakes.length === total ? [...quakes] : null;
+  const groups = sizes.map((n) => Array.from({ length: n }, () => (fixedKinds ? fixedKinds.shift()! : quakeKindFor(index, rng))));
   const inventory = groups.flat();
 
   // Reverse simulations: one per city and quake type.
@@ -141,23 +183,27 @@ function tryBuild(rng: () => number, index: number, land: Uint8Array, coast: Uin
     return byKind;
   });
   const spawnCells = cellsInSpawns(land, spawns);
+  if (spawnCells.length === 0) return null;
 
   // Witness: strongest spawn cell per quake, then delays that line crests up.
   const witness: QuakePlacement[] = [];
+  const crowdIn = (picks: { cell: number }[], cell: number) => picks.filter((p) => sameSpawn(spawns, p.cell, cell)).length;
   groups.forEach((group, c) => {
     const picks: { kind: QuakeKind; cell: number; step: number }[] = [];
     for (const kind of group) {
       const r = responses[c].get(kind)!;
       let bestCell = -1;
+      let bestScore = -Infinity;
       for (const cell of spawnCells) {
         const x = cell % GRID_W;
         const y = (cell - x) / GRID_W;
-        if (witness.some((q) => Math.hypot(q.x - x, q.y - y) < QUAKE_MIN_SEPARATION + 1)) continue;
-        if (picks.some((p) => Math.hypot((p.cell % GRID_W) - x, Math.floor(p.cell / GRID_W) - y) < QUAKE_MIN_SEPARATION + 1)) continue;
+        const tooClose = (qx: number, qy: number) => Math.hypot(qx - x, qy - y) < QUAKE_MIN_SEPARATION + 1;
+        if (witness.some((q) => tooClose(q.x, q.y))) continue;
+        if (picks.some((p) => tooClose(p.cell % GRID_W, Math.floor(p.cell / GRID_W)))) continue;
         // Spread quakes over different epicenters when it costs little.
-        const crowd = picks.filter((p) => sameSpawn(spawns, p.cell, cell)).length;
-        const score = r.peak[cell] * (1 - 0.15 * crowd);
-        if (bestCell < 0 || score > r.peak[bestCell] * (1 - 0.15 * picks.filter((p) => sameSpawn(spawns, p.cell, bestCell)).length)) {
+        const score = r.peak[cell] * (1 - 0.15 * crowdIn(picks, cell));
+        if (score > bestScore) {
+          bestScore = score;
           bestCell = cell;
         }
       }
@@ -184,10 +230,13 @@ function tryBuild(rng: () => number, index: number, land: Uint8Array, coast: Uin
     // Best a single quake of any available type can do from any spawn cell.
     let single = 0;
     for (const r of responses[c].values()) for (const cell of spawnCells) single = Math.max(single, r.peak[cell]);
-    const wall = Math.max(MIN_WALL, single * 1.1, crest * 0.5);
-    if (wall >= crest * 0.92) return null;
+    let wall = Math.max(MIN_WALL, single * 1.1, crest * 0.5);
+    if (wall >= crest * 0.92) {
+      if (!relaxed) return null;
+      wall = Math.max(0.5, crest * 0.7);
+    }
     const damage = replayDamage(timed.series[c], wall);
-    if (damage < MIN_WITNESS_DAMAGE) return null;
+    if (damage < (relaxed ? 0.3 : MIN_WITNESS_DAMAGE)) return null;
     const hp = Math.round(damage * HP_FRACTION * 10) / 10;
     timingRatio = Math.min(timingRatio, replayDamage(flat.series[c], wall) / hp);
     cities.push({
@@ -230,6 +279,31 @@ function forwardSeries(land: Uint8Array, sites: readonly Site[], witness: readon
   return { series, peak: sim.peak! };
 }
 
+/** Shoreline cells of a city at (x, y), or null if it has no sea in front. */
+function siteAt(land: Uint8Array, x: number, y: number, minShore: number): Site | null {
+  const shore: number[] = [];
+  let mouth = -1;
+  let mouthD = Infinity;
+  for (let dy = -CITY_SHORE_RADIUS; dy <= CITY_SHORE_RADIUS; dy++) {
+    for (let dx = -CITY_SHORE_RADIUS; dx <= CITY_SHORE_RADIUS; dx++) {
+      const d = Math.hypot(dx, dy);
+      if (d > CITY_SHORE_RADIUS) continue;
+      const px = x + dx;
+      const py = y + dy;
+      if (px < SPONGE || py < SPONGE || px >= GRID_W - SPONGE || py >= GRID_H - SPONGE) continue;
+      const idx = py * GRID_W + px;
+      if (land[idx]) continue;
+      shore.push(idx);
+      if (d < mouthD) {
+        mouthD = d;
+        mouth = idx;
+      }
+    }
+  }
+  if (shore.length < minShore || mouthD > 2.5) return null;
+  return { x, y, shore, mouth };
+}
+
 function pickCitySites(rng: () => number, land: Uint8Array, count: number): Site[] | null {
   const margin = SPONGE + 3;
   const sites: Site[] = [];
@@ -238,28 +312,9 @@ function pickCitySites(rng: () => number, land: Uint8Array, count: number): Site
     const y = margin + Math.floor(rng() * (GRID_H - 2 * margin));
     if (!land[y * GRID_W + x]) continue;
     if (sites.some((s) => Math.hypot(s.x - x, s.y - y) < CITY_SEPARATION)) continue;
-    const shore: number[] = [];
-    let mouth = -1;
-    let mouthD = Infinity;
-    for (let dy = -CITY_SHORE_RADIUS; dy <= CITY_SHORE_RADIUS; dy++) {
-      for (let dx = -CITY_SHORE_RADIUS; dx <= CITY_SHORE_RADIUS; dx++) {
-        const d = Math.hypot(dx, dy);
-        if (d > CITY_SHORE_RADIUS) continue;
-        const px = x + dx;
-        const py = y + dy;
-        if (px < SPONGE || py < SPONGE || px >= GRID_W - SPONGE || py >= GRID_H - SPONGE) continue;
-        const idx = py * GRID_W + px;
-        if (land[idx]) continue;
-        shore.push(idx);
-        if (d < mouthD) {
-          mouthD = d;
-          mouth = idx;
-        }
-      }
-    }
     // A city needs open water in front of it, but must sit on the coast.
-    if (shore.length < 10 || mouthD > 2.5) continue;
-    sites.push({ x, y, shore, mouth });
+    const site = siteAt(land, x, y, 10);
+    if (site) sites.push(site);
   }
   return sites.length === count ? sites : null;
 }
@@ -297,6 +352,32 @@ function cellsInSpawns(land: Uint8Array, spawns: readonly SpawnArea[]): number[]
   return out;
 }
 
+function peakAround(field: Float32Array, x: number, y: number): number {
+  let peak = 0;
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  for (let dy = -ZONE_RADIUS; dy <= ZONE_RADIUS; dy++) {
+    for (let dx = -ZONE_RADIUS; dx <= ZONE_RADIUS; dx++) {
+      if (dx * dx + dy * dy > ZONE_RADIUS * ZONE_RADIUS) continue;
+      const px = cx + dx;
+      const py = cy + dy;
+      if (px < 0 || py < 0 || px >= GRID_W || py >= GRID_H) continue;
+      peak = Math.max(peak, field[py * GRID_W + px]);
+    }
+  }
+  return peak;
+}
+
+/** Rings at fixed map positions; the threshold is what the witness reached there. */
+function zonesAt(spots: readonly { x: number; y: number }[], c: Candidate): ChaosZone[] {
+  return spots.map((s) => ({
+    x: s.x,
+    y: s.y,
+    threshold: Math.max(1.5, Math.floor(peakAround(c.peakField, s.x, s.y) * 0.85 * 10) / 10),
+    mult: ZONE_MULT,
+  }));
+}
+
 /** A bonus ring where the witness produced a big crest out at sea. */
 function pickZones(land: Uint8Array, coast: Uint8Array, c: Candidate): ChaosZone[] {
   const margin = SPONGE + 4;
@@ -312,12 +393,5 @@ function pickZones(land: Uint8Array, coast: Uint8Array, c: Candidate): ChaosZone
   }
   if (bestIdx < 0) return [];
   const x = bestIdx % GRID_W;
-  const y = (bestIdx - x) / GRID_W;
-  let peak = 0;
-  for (let dy = -ZONE_RADIUS; dy <= ZONE_RADIUS; dy++) {
-    for (let dx = -ZONE_RADIUS; dx <= ZONE_RADIUS; dx++) {
-      if (dx * dx + dy * dy <= ZONE_RADIUS * ZONE_RADIUS) peak = Math.max(peak, c.peakField[(y + dy) * GRID_W + x + dx]);
-    }
-  }
-  return [{ x, y, threshold: Math.floor(peak * 0.85 * 10) / 10, mult: 1.5 }];
+  return zonesAt([{ x, y: (bestIdx - x) / GRID_W }], c);
 }

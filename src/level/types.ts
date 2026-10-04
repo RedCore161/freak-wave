@@ -1,5 +1,6 @@
 import type { CitySpec } from '../sim/cities.ts';
 import type { QuakeKind } from '../sim/quakes.ts';
+import type { MapMarkers } from './mapImage.ts';
 
 export interface SpawnArea {
   x: number;
@@ -35,6 +36,7 @@ export interface LevelData {
   inventory: QuakeKind[];
   /** A known solution the generator verified (debugging and playtests). */
   witness: QuakePlacement[];
+  hint?: string;
   /** Best city's damage with all delays at zero, over its hp: below 1 means timing is required. */
   timingRatio: number;
 }
@@ -42,7 +44,11 @@ export interface LevelData {
 export interface LevelRequest {
   index: number;
   seed: number;
-  /** Hand-made terrain (from a PNG); procedural islands if omitted. */
-  land?: Uint8Array;
+  /** Hand-made map (from a PNG with markers); procedural if omitted. */
+  map?: MapMarkers;
   name?: string;
+  /** Exact quake types for a hand-made map, in city order. */
+  quakes?: QuakeKind[];
+  /** Short tip shown when the sea starts. */
+  hint?: string;
 }

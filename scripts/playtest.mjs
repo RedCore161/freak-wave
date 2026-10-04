@@ -24,6 +24,14 @@ await page.waitForSelector('.title-panel');
 await page.waitForTimeout(500);
 await page.screenshot({ path: `${out}/1-menu.png` });
 await page.click('text=Start run');
+// First run shows the tutorial: page through it once.
+await page.waitForSelector('.tutorial-panel');
+await page.waitForTimeout(900);
+await page.screenshot({ path: `${out}/1b-tutorial.png` });
+for (let i = 0; i < 4; i++) await page.click('.tutorial-panel .btn.primary');
+await page.waitForTimeout(900);
+await page.screenshot({ path: `${out}/1c-tutorial-last.png` });
+await page.click('.tutorial-panel .btn.primary');
 
 for (let lvl = 0; lvl < levels; lvl++) {
   if (lvl > 0) await page.click('text=Next sea');
@@ -59,10 +67,20 @@ for (let lvl = 0; lvl < levels; lvl++) {
 
 await page.click('text=Skill tree');
 await page.waitForTimeout(600);
+await page.hover('.skill:nth-of-type(2)');
+await page.waitForTimeout(300);
 await page.screenshot({ path: `${out}/6-skills.png` });
 await page.click('.skill.buyable, .skill');
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${out}/7-skill-detail.png` });
 
+// Back to the menu, then open settings from its corner gear.
+await page.click('text=Done');
+await page.waitForTimeout(400);
+await page.click('text=Give up');
+await page.waitForSelector('.title-panel .corner');
+await page.click('.title-panel .corner');
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${out}/8-settings.png` });
 console.log(errors.length ? `Errors:\n${errors.join('\n')}` : 'No page errors');
 await browser.close();

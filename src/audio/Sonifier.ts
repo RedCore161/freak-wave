@@ -4,7 +4,6 @@
 // follow how close the water at its shore is to topping the wall.
 
 const PENTATONIC = [196, 233, 262, 311, 349, 392, 466];
-const MUTE_KEY = 'freakwave.muted';
 
 interface CityVoice {
   osc: OscillatorNode;
@@ -12,21 +11,31 @@ interface CityVoice {
   base: number;
 }
 
+export interface AudioSettings {
+  master: number;
+  ambience: number;
+  effects: number;
+  muted: boolean;
+}
+
 export class Sonifier {
   private ctx: AudioContext | null = null;
+  private out!: GainNode;
+  private ambience!: GainNode;
+  /** Effects bus; every one-shot sound connects here. */
   private master!: GainNode;
   private surfGain!: GainNode;
   private surfFilter!: BiquadFilterNode;
   private noise!: AudioBuffer;
   private voices: CityVoice[] = [];
-  muted = false;
+  private settings: AudioSettings;
 
-  constructor() {
-    try {
-      this.muted = localStorage.getItem(MUTE_KEY) === '1';
-    } catch {
-      // Storage unavailable; default to sound on.
-    }
+  constructor(settings: AudioSettings) {
+    this.settings = { ...settings };
+  }
+
+  get muted(): boolean {
+    return this.settings.muted;
   }
 
   /** Browsers only allow audio after a user gesture; call from one. */
@@ -42,9 +51,13 @@ export class Sonifier {
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -18;
     comp.connect(ctx.destination);
+    this.out = ctx.createGain();
+    this.out.connect(comp);
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.8;
-    this.master.connect(comp);
+    this.master.connect(this.out);
+    this.ambience = ctx.createGain();
+    this.ambience.connect(this.out);
+    this.applySettings();
 
     this.noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = this.noise.getChannelData(0);
@@ -62,18 +75,23 @@ export class Sonifier {
     this.surfFilter.frequency.value = 300;
     this.surfGain = ctx.createGain();
     this.surfGain.gain.value = 0.05;
-    src.connect(this.surfFilter).connect(this.surfGain).connect(this.master);
+    src.connect(this.surfFilter).connect(this.surfGain).connect(this.ambience);
     src.start();
   }
 
-  setMuted(muted: boolean): void {
-    this.muted = muted;
-    try {
-      localStorage.setItem(MUTE_KEY, muted ? '1' : '0');
-    } catch {
-      // Ignore; mute lasts for this session.
-    }
-    if (this.ctx) this.master.gain.setTargetAtTime(muted ? 0 : 0.8, this.ctx.currentTime, 0.05);
+  configure(settings: AudioSettings): void {
+    this.settings = { ...settings };
+    this.applySettings();
+  }
+
+  private applySettings(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const s = this.settings;
+    const t = ctx.currentTime;
+    this.out.gain.setTargetAtTime(s.muted ? 0 : s.master, t, 0.05);
+    this.master.gain.setTargetAtTime(s.effects, t, 0.05);
+    this.ambience.gain.setTargetAtTime(s.ambience, t, 0.05);
   }
 
   /** One voice per city; call when a level loads. */
@@ -92,7 +110,7 @@ export class Sonifier {
       osc.frequency.value = base;
       const gain = ctx.createGain();
       gain.gain.value = 0;
-      osc.connect(gain).connect(this.master);
+      osc.connect(gain).connect(this.ambience);
       osc.start();
       this.voices.push({ osc, gain, base });
     }

@@ -19,7 +19,9 @@ Tools:
 
 | Command | What it does |
 |---|---|
-| `npm run levels` | Regenerates the hand-made opening maps in `public/levels/` |
+| `npm run levels` | Regenerates the 12 campaign maps in `public/levels/` from `scripts/make-levels.mjs` |
+| `node scripts/campaign-test.ts` | Parses every campaign map and generates its level (walls, hp, timing check) |
+| `node scripts/settle-test.ts` | Shows how long attempts last with the early-end rules |
 | `npm run calibrate` | Prints wave height and crest arrival vs distance per quake type |
 | `node scripts/gen-test.ts` | Generates levels headlessly and reports timing, walls and hp |
 | `node scripts/timing-test.ts` | Checks levels are solvable by lining up the timeline's crest estimates |
@@ -73,18 +75,41 @@ and arrival time at that city. The generator then:
 
 Generation runs in a Web Worker and prefetches the next sea while you play.
 
-### Hand-made maps
+### Campaign maps
 
-Add an alpha PNG to `public/levels/` (opaque = land, transparent = water, 16:10,
-any resolution) and list it in `public/levels/levels.json`. Listed maps open
-each run. Cities, epicenters and walls are still generated and verified.
+The campaign is a fixed sequence: 12 hand-made maps, then procedural seas.
+Every level has a fixed seed, so a sea plays the same in every run. Skill, not luck.
+
+Maps are RGBA PNGs (16:10, any resolution; the shipped ones are 320×200),
+listed in `public/levels/levels.json` with an optional quake list and hint:
+
+| Pixel colour | Meaning |
+|---|---|
+| transparent | water |
+| any other opaque colour | land |
+| `#FF0000` red | city, level 1 (a dot on the coast) |
+| `#FF8000` orange | city, level 2 |
+| `#FF00FF` magenta | city, level 3 |
+| `#00FF00` green | epicenter (a filled disc; its size sets the radius) |
+| `#FFFF00` yellow | golden chaos ring (a small dot) |
+
+Keep features about 24 px from the edges, which are open ocean. Walls, hp,
+ring heights and (if not listed) quake types are computed by the generator.
+
+### Ending rounds early
+
+An attempt ends as soon as nothing more can happen: every quake has fired, and
+either no wave anywhere could top a standing wall even if all quakes' waves
+stacked, or nothing has hit for 2.5 s and the waves are well below the walls.
+Attempts typically last 3–10 s. The **Skip** button ends one immediately.
 
 ### Sound
 
 All audio is synthesised; there are no samples. Surf noise follows the sea's
 overall activity. Each city has a tone whose pitch and volume rise as water
 climbs its wall. Quakes, crest hits (with rising combo plucks), ruins and UI
-actions each have their own synthesised sound.
+actions each have their own synthesised sound. Master, ambience and effects
+volumes are adjustable in Settings.
 
 ## Skill tree
 

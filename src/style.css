@@ -1271,3 +1271,373 @@ body:not(.playing) .labels {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ------------------------------------------------------------ compact city cards */
+
+.city-label .city-card {
+  transform-origin: 50% 100%;
+}
+
+.city-label:not(.active) .city-card {
+  opacity: 0.42;
+  min-width: 70px;
+  transform: translate(0, -100%) scale(0.86);
+  background: rgba(6, 21, 37, 0.55);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.city-label:not(.active) .city-stats,
+.city-label:not(.active) .city-name {
+  display: none;
+}
+
+.city-label.active .city-card {
+  opacity: 1;
+}
+
+.city-card {
+  transition: transform 0.25s var(--ease-back), opacity 0.2s, background 0.3s;
+}
+
+/* ------------------------------------------------------------ settings */
+
+.corner {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+
+.title-panel {
+  position: relative;
+}
+
+.settings-panel h3 {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.setting {
+  display: grid;
+  grid-template-columns: 90px 1fr 34px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.setting.toggle {
+  grid-template-columns: 1fr auto;
+}
+
+.setting input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.setting input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.slider-value {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------ tutorial */
+
+.tutorial-panel {
+  width: min(100%, 480px);
+  text-align: center;
+}
+
+.tut-step {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  margin-bottom: 10px;
+}
+
+.tut-art svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 14px;
+  animation: rise 0.35s var(--ease-out);
+}
+
+.tutorial-panel h2 {
+  margin-top: 16px;
+}
+
+.tut-body {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 6px 0 14px;
+  min-height: 3em;
+}
+
+.tut-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tut-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(126, 212, 255, 0.25);
+  transition: width 0.25s var(--ease-out), background 0.25s;
+}
+
+.tut-dots span.on {
+  width: 20px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.tutorial-panel .panel-actions {
+  justify-content: center;
+}
+
+.tut-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tut-ring 1.8s ease-out infinite;
+}
+
+@keyframes tut-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(22);
+    opacity: 0;
+    stroke-width: 0.2;
+  }
+}
+
+.tut-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tut-pop 2s var(--ease-back) infinite;
+}
+
+@keyframes tut-pop {
+  0%,
+  30% {
+    opacity: 0;
+  }
+  45%,
+  100% {
+    opacity: 1;
+  }
+}
+
+.tut-tap {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tut-tap 2s ease-out infinite;
+}
+
+@keyframes tut-tap {
+  0%,
+  20% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+.tut-finger {
+  animation: tut-finger 2s ease-in-out infinite;
+}
+
+@keyframes tut-finger {
+  0% {
+    transform: translate(20px, 20px);
+    opacity: 0;
+  }
+  25% {
+    transform: translate(-66px, -26px);
+    opacity: 1;
+  }
+  60% {
+    transform: translate(-66px, -26px);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-66px, -26px);
+    opacity: 0;
+  }
+}
+
+.tut-slide,
+.tut-tick {
+  animation: tut-slide 3s var(--ease-out) infinite;
+}
+
+@keyframes tut-slide {
+  0%,
+  15% {
+    transform: translateX(-60px);
+  }
+  55%,
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.tut-tick {
+  animation-name: tut-tick;
+}
+
+@keyframes tut-tick {
+  0%,
+  15% {
+    transform: translateX(-60px);
+  }
+  55%,
+  100% {
+    transform: translateX(20px);
+  }
+}
+
+.tut-together {
+  animation: tut-together 3s ease-out infinite;
+}
+
+@keyframes tut-together {
+  0%,
+  55% {
+    opacity: 0;
+  }
+  65%,
+  90% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.tut-wave {
+  animation: tut-wave 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes tut-wave {
+  from {
+    transform: translateX(-30px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.tut-ruin {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: tut-ruin 2.6s ease-in infinite;
+}
+
+@keyframes tut-ruin {
+  0%,
+  40% {
+    transform: none;
+    opacity: 1;
+  }
+  70%,
+  100% {
+    transform: rotate(24deg) translateY(6px) scaleY(0.4);
+    opacity: 0.4;
+  }
+}
+
+/* ------------------------------------------------------------ skill tooltip */
+
+.skill-tip {
+  position: absolute;
+  z-index: 5;
+  width: 230px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #0d2a44;
+  border: 1px solid rgba(126, 212, 255, 0.3);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  font-size: 13px;
+  animation: tip-in 0.15s var(--ease-out);
+}
+
+.skill-tip.below {
+  transform: translate(-50%, 0);
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.skill-tip p {
+  margin: 3px 0 6px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.tip-cost {
+  display: block;
+  margin-top: 6px;
+  font-weight: 700;
+  color: var(--warm);
+}
+
+.tip-cost.owned {
+  color: var(--accent);
+}
+
+.skill-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0;
+}
+
+.skill-diff div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.skill-diff b {
+  color: var(--text);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.skill-diff i {
+  font-style: normal;
+  color: var(--accent);
+}

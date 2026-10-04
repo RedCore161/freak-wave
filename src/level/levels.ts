@@ -1,15 +1,18 @@
-import { landFromRgba } from './terrain.ts';
+import type { QuakeKind } from '../sim/quakes.ts';
+import { parseMapImage, type MapMarkers } from './mapImage.ts';
 import type { LevelData, LevelRequest } from './types.ts';
 
 interface HandmadeEntry {
   name: string;
   image: string;
+  quakes?: QuakeKind[];
+  hint?: string;
 }
 
 /**
- * Hand-made levels come from public/levels/levels.json: a list of alpha PNGs
- * (opaque = land, transparent = water). They open a run; procedural levels
- * follow. Targets and requirements are still verified by the generator.
+ * The campaign: hand-made maps from public/levels/levels.json in order, then
+ * procedural seas. Every level has a fixed seed, so a sea is identical in
+ * every run. The game is about skill, not luck.
  */
 let manifest: Promise<HandmadeEntry[]> | null = null;
 
@@ -20,7 +23,7 @@ function loadManifest(): Promise<HandmadeEntry[]> {
   return manifest;
 }
 
-async function loadLandFromImage(url: string): Promise<Uint8Array> {
+async function loadMap(url: string): Promise<MapMarkers> {
   const img = new Image();
   img.src = url;
   await img.decode();
@@ -30,13 +33,18 @@ async function loadLandFromImage(url: string): Promise<Uint8Array> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(img, 0, 0);
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  return landFromRgba(data, canvas.width, canvas.height);
+  return parseMapImage(data, canvas.width, canvas.height);
+}
+
+/** Fixed seed per level index. */
+export function levelSeed(index: number): number {
+  return (Math.imul(index + 1, 2654435761) ^ 0x5eed) >>> 0;
 }
 
 export class LevelSource {
   private worker = new Worker(new URL('./genWorker.ts', import.meta.url), { type: 'module' });
   private pending = new Map<number, { resolve: (l: LevelData) => void; reject: (e: Error) => void }>();
-  private cache = new Map<string, Promise<LevelData>>();
+  private cache = new Map<number, Promise<LevelData>>();
   private nextId = 1;
 
   constructor() {
@@ -49,40 +57,31 @@ export class LevelSource {
     };
   }
 
-  /** Returns (and caches) the level for a run seed and index; call early to prefetch. */
-  get(runSeed: number, index: number): Promise<LevelData> {
-    const key = `${runSeed}:${index}`;
-    let p = this.cache.get(key);
+  /** Returns (and caches) a level; call early to prefetch. */
+  get(index: number): Promise<LevelData> {
+    let p = this.cache.get(index);
     if (!p) {
-      p = this.build(runSeed, index);
-      this.cache.set(key, p);
-      p.catch(() => this.cache.delete(key));
+      p = this.build(index);
+      this.cache.set(index, p);
+      p.catch(() => this.cache.delete(index));
     }
     return p;
   }
 
-  forgetRun(runSeed: number): void {
-    for (const key of this.cache.keys()) if (key.startsWith(`${runSeed}:`)) this.cache.delete(key);
-  }
-
-  private async build(runSeed: number, index: number): Promise<LevelData> {
-    const req: LevelRequest = { index, seed: (runSeed * 31 + index * 7919) >>> 0 };
+  private async build(index: number): Promise<LevelData> {
+    const req: LevelRequest = { index, seed: levelSeed(index) };
     const entries = await loadManifest();
     const entry = entries[index];
     if (entry) {
-      try {
-        req.land = await loadLandFromImage(`${import.meta.env.BASE_URL}levels/${entry.image}`);
-        req.name = entry.name;
-      } catch {
-        // Fall back to a procedural level if the image is missing.
-      }
+      req.map = await loadMap(`${import.meta.env.BASE_URL}levels/${entry.image}`);
+      req.name = entry.name;
+      req.quakes = entry.quakes;
+      req.hint = entry.hint;
     }
-    return new Promise((resolve, reject) => {
+    return new Promise<LevelData>((resolve, reject) => {
       const id = this.nextId++;
       this.pending.set(id, { resolve, reject });
-      const transfer = req.land ? [req.land.buffer] : [];
-      this.worker.postMessage({ id, req }, transfer);
+      this.worker.postMessage({ id, req });
     });
   }
 }
-

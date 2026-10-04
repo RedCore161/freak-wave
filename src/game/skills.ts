@@ -163,3 +163,51 @@ export function canBuy(id: string, owned: ReadonlySet<string>, chaos: number): b
   const def = SKILL_BY_ID[id];
   return !!def && !owned.has(id) && chaos >= def.cost && def.requires.every((r) => owned.has(r));
 }
+
+export const ZONE_BASE_MULT = 1.5;
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const onOff = (v: boolean) => (v ? 'On' : 'Off');
+const count = (l: Loadout, k: QuakeKind) => `${l.bonusQuakes.filter((q) => q === k).length}`;
+
+/** Every stat a skill can change, formatted for the tooltip. */
+const STATS: { label: string; get: (l: Loadout) => string }[] = [
+  { label: 'Extra Tremors', get: (l) => count(l, 'small') },
+  { label: 'Extra Quakes', get: (l) => count(l, 'medium') },
+  { label: 'Extra Megaquakes', get: (l) => count(l, 'large') },
+  { label: 'Rifts', get: (l) => count(l, 'rift') },
+  { label: 'Pulsars', get: (l) => count(l, 'pulse') },
+  { label: 'Wave height', get: (l) => pct(l.mods.ampMul) },
+  { label: 'Wave length', get: (l) => pct(l.mods.periodMul) },
+  { label: 'Extra waves per quake', get: (l) => `${l.mods.extraCycles}` },
+  { label: 'Open-water energy loss', get: (l) => pct(l.openDamp / DEFAULT_OPEN_DAMP) },
+  { label: 'Aftershocks', get: (l) => `${l.aftershocks}` },
+  { label: 'Isochrones', get: (l) => onOff(l.isochrones) },
+  { label: 'Max delay', get: (l) => `${l.maxFuse} s` },
+  { label: 'Delay step', get: (l) => `${l.fuseStep} s` },
+  { label: 'Oracle previews', get: (l) => `${l.oracles}` },
+  { label: 'Bullet Time', get: (l) => onOff(l.slowMotion) },
+  { label: 'Combo window', get: (l) => `${l.rules.comboWindow.toFixed(1)} s` },
+  { label: 'Combo bonus per step', get: (l) => `+${Math.round(l.rules.comboStep * 100)}%` },
+  { label: 'Combo cap', get: (l) => `×${l.rules.comboMax}` },
+  { label: 'Crest damage', get: (l) => pct(l.rules.damageMul) },
+  { label: 'City wall height', get: (l) => pct(l.rules.protectionMul) },
+  { label: 'Coast absorption', get: (l) => pct(l.coastAbsorb / DEFAULT_COAST_ABSORB) },
+  { label: 'Domino', get: (l) => onOff(l.domino) },
+  { label: 'Attempts per sea', get: (l) => `${l.attempts}` },
+  { label: 'Chaos earned', get: (l) => pct(l.chaosMul) },
+  { label: 'Epicenter size', get: (l) => pct(l.spawnRadiusMul) },
+  { label: 'Extra epicenters', get: (l) => `${l.extraSpawns}` },
+  { label: 'Chaos per unused quake', get: (l) => `${l.salvage}` },
+  { label: 'Golden ring multiplier', get: (l) => `×${(ZONE_BASE_MULT + l.zoneBonus).toFixed(1)}` },
+  { label: 'Perfect Storm', get: (l) => onOff(l.perfectStorm) },
+];
+
+/** What buying a skill changes: current value and value afterwards. */
+export function skillDiff(id: string, owned: ReadonlySet<string>): { label: string; from: string; to: string }[] {
+  const without = new Set(owned);
+  without.delete(id);
+  const before = loadout(without);
+  const after = loadout(new Set([...without, id]));
+  return STATS.map((s) => ({ label: s.label, from: s.get(before), to: s.get(after) })).filter((d) => d.from !== d.to);
+}

@@ -1,6 +1,8 @@
 import { QUAKE_TYPES, type QuakeKind } from '../sim/quakes.ts';
-import { BRANCHES, canBuy, SKILLS, SKILL_BY_ID } from '../game/skills.ts';
+import { BRANCHES, canBuy, skillDiff, SKILLS, SKILL_BY_ID } from '../game/skills.ts';
+import type { Settings } from '../game/settings.ts';
 import { iconEl, iconSvg, type IconId } from './icons.ts';
+import { TUTORIAL_SLIDES } from './tutorial.ts';
 
 type Child = Node | string | null | undefined | false;
 
@@ -42,6 +44,8 @@ export interface CityLabel {
   /** Shoreline height / wall, for the live gauge. */
   water: number;
   prediction: number | null;
+  /** Hovered, pinned or just hit: shown in full; otherwise a faded compact card. */
+  active: boolean;
 }
 
 export interface ZoneLabel {
@@ -96,6 +100,8 @@ export class Ui {
   onSelectQuake: (id: number) => void = () => {};
   onRotate: () => void = () => {};
   onRemove: () => void = () => {};
+  onSettings: () => void = () => {};
+  onSkip: () => void = () => {};
   /** Any button press, for the click sound. */
   onTap: () => void = () => {};
 
@@ -105,6 +111,8 @@ export class Ui {
   private hudChaos = h('div', { class: 'hud-chaos', title: 'Chaos' });
   private speedBtn = h('button', { class: 'btn small ghost', onclick: () => this.onSpeed() });
   private muteBtn = h('button', { class: 'btn small ghost icon-btn', onclick: () => this.onMute(), title: 'Sound' });
+  private skipBtn = h('button', { class: 'btn small ghost', onclick: () => this.onSkip(), title: 'End this attempt now' }, 'Skip');
+  private settingsBtn = h('button', { class: 'btn small ghost icon-btn', onclick: () => this.onSettings(), title: 'Settings' });
   private progress = h('div', { class: 'progress' }, h('div', { class: 'progress-fill' }));
   private hint = h('div', { class: 'hint' });
   private dock = h('div', { class: 'dock' });
@@ -127,11 +135,12 @@ export class Ui {
   constructor(root: HTMLElement) {
     this.hud.append(
       this.hudLevel,
-      h('div', { class: 'hud-right' }, this.hudAttempts, this.hudChaos, this.speedBtn, this.muteBtn),
+      h('div', { class: 'hud-right' }, this.hudAttempts, this.hudChaos, this.skipBtn, this.speedBtn, this.muteBtn, this.settingsBtn),
       this.progress,
     );
     this.dock.append(this.hint, this.timeline, this.tray);
     this.buildQuakePanel();
+    this.settingsBtn.innerHTML = GEAR;
     root.append(this.labels, this.banners, this.hud, this.dock, this.quakePanel, this.overlay);
     root.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) this.onTap();
@@ -156,6 +165,7 @@ export class Ui {
     this.hudChaos.textContent = `${d.chaos} chaos`;
     this.speedBtn.textContent = `${d.speed}×`;
     this.speedBtn.hidden = !d.running;
+    this.skipBtn.hidden = !d.running;
     this.progress.hidden = !d.running;
     this.muteBtn.innerHTML = d.muted
       ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9v6h4l5 4V5L8 9zM17 9l5 6M22 9l-5 6"/></svg>'
@@ -334,6 +344,7 @@ export class Ui {
       const el = this.cityEls[k];
       el.style.transform = `translate(${c.x}px, ${c.y}px)`;
       const water = Math.max(0, Math.min(1.3, c.water));
+      el.classList.toggle('active', c.active || c.prediction !== null);
       const key = `${c.name}|${c.wall}|${c.damage.toFixed(2)}|${c.ruined}|${water.toFixed(2)}|${c.prediction}`;
       if (el.dataset.key === key) return;
       el.dataset.key = key;
@@ -428,9 +439,17 @@ export class Ui {
     return panel;
   }
 
-  showMenu(chaos: number, bestLevel: number, skills: number, a: { start: () => void; skills: () => void }): void {
+  showMenu(
+    chaos: number,
+    bestLevel: number,
+    skills: number,
+    a: { start: () => void; skills: () => void; tutorial: () => void; settings: () => void },
+  ): void {
+    const gear = h('button', { class: 'btn small ghost icon-btn corner', onclick: a.settings, title: 'Settings' });
+    gear.innerHTML = GEAR;
     this.showPanel(
       'title-panel',
+      gear,
       h('h1', { class: 'logo' }, 'Freak', h('span', {}, 'Wave')),
       h('p', { class: 'tagline' }, 'Time your earthquakes. Stack the waves. Drown the coast.'),
       h(
@@ -443,6 +462,7 @@ export class Ui {
       h(
         'div',
         { class: 'panel-actions' },
+        h('button', { class: 'btn ghost', onclick: a.tutorial }, 'How to play'),
         h('button', { class: 'btn ghost', onclick: a.skills }, 'Skill tree'),
         h('button', { class: 'btn primary', onclick: a.start }, 'Start run'),
       ),
@@ -453,6 +473,77 @@ export class Ui {
         h('li', {}, 'Drag quakes along the timeline to delay them, so their crests reach a city together.'),
         h('li', {}, 'Every crest that tops a sea wall damages the city. Back-to-back crests combo.'),
         h('li', {}, 'Ruin every city within 3 attempts. Golden rings multiply your chaos.'),
+      ),
+    );
+  }
+
+  showSettings(
+    settings: Settings,
+    a: { change: (s: Settings) => void; reset: () => void; tutorial: () => void; close: () => void },
+  ): void {
+    const s = { ...settings };
+    const slider = (label: string, key: 'master' | 'ambience' | 'effects') => {
+      const input = h('input', { type: 'range', min: '0', max: '100', value: String(Math.round(s[key] * 100)) });
+      const value = h('span', { class: 'slider-value' }, `${Math.round(s[key] * 100)}`);
+      input.addEventListener('input', () => {
+        s[key] = Number(input.value) / 100;
+        value.textContent = input.value;
+        a.change({ ...s });
+      });
+      return h('label', { class: 'setting' }, h('span', {}, label), input, value);
+    };
+    const mute = h('input', { type: 'checkbox' });
+    mute.checked = s.muted;
+    mute.addEventListener('change', () => {
+      s.muted = mute.checked;
+      a.change({ ...s });
+    });
+    let armed = false;
+    const reset = h('button', { class: 'btn danger' }, 'Reset progress');
+    reset.addEventListener('click', () => {
+      if (!armed) {
+        armed = true;
+        reset.textContent = 'Tap again to erase all chaos and skills';
+        setTimeout(() => {
+          armed = false;
+          if (reset.isConnected) reset.textContent = 'Reset progress';
+        }, 3500);
+        return;
+      }
+      a.reset();
+    });
+    this.showPanel(
+      'settings-panel',
+      h('h2', {}, 'Settings'),
+      h('h3', {}, 'Audio'),
+      slider('Master', 'master'),
+      slider('Ambience', 'ambience'),
+      slider('Effects', 'effects'),
+      h('label', { class: 'setting toggle' }, h('span', {}, 'Mute everything'), mute),
+      h('h3', {}, 'Game'),
+      h('div', { class: 'setting-actions' }, h('button', { class: 'btn ghost', onclick: a.tutorial }, 'Replay tutorial'), reset),
+      h('div', { class: 'panel-actions' }, h('button', { class: 'btn primary', onclick: a.close }, 'Done')),
+    );
+  }
+
+  showTutorial(done: () => void, start = 0): void {
+    const slide = TUTORIAL_SLIDES[start];
+    const last = start === TUTORIAL_SLIDES.length - 1;
+    const art = h('div', { class: 'tut-art' });
+    art.innerHTML = `<svg viewBox="0 0 240 140" role="img" aria-label="${slide.title}">${slide.svg}</svg>`;
+    this.showPanel(
+      `tutorial-panel${start > 0 ? ' instant' : ''}`,
+      h('div', { class: 'tut-step' }, `${start + 1} / ${TUTORIAL_SLIDES.length}`),
+      art,
+      h('h2', {}, slide.title),
+      h('p', { class: 'tut-body' }, slide.body),
+      h('div', { class: 'tut-dots' }, ...TUTORIAL_SLIDES.map((_, i) => h('span', { class: i === start ? 'on' : '' }))),
+      h(
+        'div',
+        { class: 'panel-actions' },
+        !last && h('button', { class: 'btn ghost', onclick: done }, 'Skip'),
+        start > 0 && h('button', { class: 'btn ghost', onclick: () => this.showTutorial(done, start - 1) }, 'Back'),
+        h('button', { class: 'btn primary', onclick: () => (last ? done() : this.showTutorial(done, start + 1)) }, last ? 'Let\u2019s go' : 'Next'),
       ),
     );
   }
@@ -599,10 +690,15 @@ export class Ui {
         h('span', { class: 'skill-name' }, s.name),
       );
       (node.firstElementChild as HTMLElement).innerHTML = iconSvg(s.icon, 22);
+      node.addEventListener('pointerenter', (e) => {
+        if (e.pointerType === 'mouse') this.showSkillTip(tree, s.id, owned, chaos, p);
+      });
+      node.addEventListener('pointerleave', () => this.skillTip.remove());
       return node;
     });
 
-    const tree = h('div', { class: 'skill-tree', style: `width: ${width}px; height: ${height}px` }, svg, ...nodes);
+    this.skillTip.remove();
+    const tree: HTMLElement = h('div', { class: 'skill-tree', style: `width: ${width}px; height: ${height}px` }, svg, ...nodes);
     const labels = h(
       'div',
       { class: 'branch-labels', style: `width: ${width}px` },
@@ -629,6 +725,34 @@ export class Ui {
     scroller.scrollTop = this.skillScroll.top;
   }
 
+  private skillTip = h('div', { class: 'skill-tip' });
+
+  private showSkillTip(tree: HTMLElement, id: string, owned: ReadonlySet<string>, chaos: number, p: { x: number; y: number }): void {
+    const s = SKILL_BY_ID[id];
+    const status = owned.has(id) ? 'Owned' : `${s.cost} chaos${chaos < s.cost ? ` (need ${s.cost - chaos} more)` : ''}`;
+    this.skillTip.replaceChildren(
+      h('b', {}, s.name),
+      h('p', {}, s.desc),
+      this.diffList(id, owned),
+      h('span', { class: `tip-cost${owned.has(id) ? ' owned' : ''}` }, status),
+    );
+    // Show below nodes near the top, above otherwise; stay inside the tree.
+    const below = p.y < 200;
+    this.skillTip.className = `skill-tip${below ? ' below' : ''}`;
+    this.skillTip.style.left = `${Math.max(120, Math.min(tree.offsetWidth - 120, p.x))}px`;
+    this.skillTip.style.top = `${below ? p.y + 52 : p.y - 34}px`;
+    tree.append(this.skillTip);
+  }
+
+  /** "Current => after" lines for a skill. */
+  private diffList(id: string, owned: ReadonlySet<string>): HTMLElement {
+    return h(
+      'div',
+      { class: 'skill-diff' },
+      ...skillDiff(id, owned).map((d) => h('div', {}, h('span', {}, d.label), h('b', {}, d.from, h('i', {}, ' \u21d2 '), d.to))),
+    );
+  }
+
   private skillDetail(owned: ReadonlySet<string>, chaos: number, buy: (id: string) => void): HTMLElement {
     const s = this.skillFocus ? SKILL_BY_ID[this.skillFocus] : undefined;
     if (!s) return h('div', { class: 'skill-detail muted' }, `${owned.size} of ${SKILLS.length} skills owned. Tap a skill to see what it does.`);
@@ -648,11 +772,14 @@ export class Ui {
       'div',
       { class: 'skill-detail' },
       icon,
-      h('div', { class: 'skill-text' }, h('b', {}, s.name), h('p', {}, s.desc), status && h('span', { class: 'muted' }, status)),
+      h('div', { class: 'skill-text' }, h('b', {}, s.name), h('p', {}, s.desc), this.diffList(s.id, owned), status && h('span', { class: 'muted' }, status)),
       !owned.has(s.id) && btn,
     );
   }
 }
+
+const GEAR =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
 
 /** Mouse drag-to-pan for the skill tree (touch scrolls natively). */
 function enableDragScroll(el: HTMLElement): void {

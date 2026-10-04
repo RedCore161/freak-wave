@@ -212,6 +212,21 @@ export class WaveSim {
     return best;
   }
 
+  /** Highest |height| on open water, ignoring the absorbing border. */
+  maxHeight(): number {
+    const { w, h, land, u } = this;
+    let best = 0;
+    for (let j = SPONGE; j < h - SPONGE; j++) {
+      let idx = j * w + SPONGE;
+      for (let i = SPONGE; i < w - SPONGE; i++, idx++) {
+        if (land[idx]) continue;
+        const a = u[idx] < 0 ? -u[idx] : u[idx];
+        if (a > best) best = a;
+      }
+    }
+    return best;
+  }
+
   /** Mean absolute height over a sparse sample of the sea (for audio). */
   activity(): number {
     const env = this.env ?? this.u;

@@ -13,7 +13,8 @@ import { SceneView } from '../render/SceneView.ts';
 import { Sonifier } from '../audio/Sonifier.ts';
 import type { ResultCity, Ui } from '../ui/Ui.ts';
 import { loadSave, writeSave } from './save.ts';
-import { AFTERSHOCK_DELAY, AFTERSHOCK_STRENGTH, canBuy, loadout, SKILL_BY_ID, type Loadout } from './skills.ts';
+import { loadSettings, writeSettings, type Settings } from './settings.ts';
+import { AFTERSHOCK_DELAY, AFTERSHOCK_STRENGTH, canBuy, loadout, SKILL_BY_ID, ZONE_BASE_MULT, type Loadout } from './skills.ts';
 
 type Phase = 'menu' | 'loading' | 'placing' | 'running' | 'result' | 'gameover';
 
@@ -29,7 +30,6 @@ interface PlacedQuake {
 }
 
 interface RunState {
-  seed: number;
   index: number;
   chaosEarned: number;
   cleared: number;
@@ -41,14 +41,29 @@ const GRAB_RADIUS = 3.5;
 const AFTERGLOW = 1.8;
 /** End early once the sea has calmed below this mean height. */
 const CALM = 0.05;
+/**
+ * After the last quake, end once no wave could top a wall even if the waves of
+ * every quake stacked perfectly: tallest < wall * SETTLE_SHARE / quakes.
+ */
+const SETTLE_SHARE = 0.9;
+/** ...or once nothing has hit for this long and waves are well below the walls. */
+const QUIET_STEPS = Math.round(2.5 / DT);
+const QUIET_RATIO = 0.75;
+/** Cursor distance (cells) at which a city's card expands. */
+const CITY_HOVER = 7;
+const HIT_HIGHLIGHT_MS = 1800;
 const ROTATE_STEP = Math.PI / 8;
-const ZONE_BASE_MULT = 1.5;
 const DOMINO_STRENGTH = 0.8;
 
 export class Game {
   private view: SceneView;
   private ui: Ui;
-  private audio = new Sonifier();
+  private settings: Settings = loadSettings();
+  private audio = new Sonifier(this.settings);
+  private paused = false;
+  private pinned = new Set<number>();
+  private lastHitAt: number[] = [];
+  private lastHitStep = 0;
   private levels = new LevelSource();
   private save = loadSave();
   private owned = new Set<string>(this.save.skills.filter((s) => SKILL_BY_ID[s]));
@@ -98,8 +113,19 @@ export class Game {
       this.refreshHud();
     };
     ui.onMute = () => {
-      this.audio.setMuted(!this.audio.muted);
+      this.applySettings({ ...this.settings, muted: !this.settings.muted });
       this.refreshHud();
+    };
+    ui.onSkip = () => {
+      if (this.phase === 'running') this.finish();
+    };
+    ui.onSettings = () => {
+      if (this.phase !== 'placing' && this.phase !== 'running') return;
+      this.paused = true;
+      this.openSettings(() => {
+        this.paused = false;
+        this.ui.hideOverlay();
+      });
     };
     ui.onSelectKind = (kind) => {
       this.selectedKind = kind;
@@ -155,7 +181,9 @@ export class Game {
     this.run = null;
     this.ui.setPlayVisible(false);
     this.ui.showMenu(this.save.chaos, this.save.bestLevel, this.owned.size, {
-      start: () => this.startRun(),
+      start: () => (this.settings.tutorialSeen ? this.startRun() : this.openTutorial(() => this.startRun())),
+      tutorial: () => this.openTutorial(() => this.showMenu()),
+      settings: () => this.openSettings(() => this.showMenu()),
       skills: () => this.openSkills(() => this.showMenu()),
     });
   }
@@ -182,9 +210,38 @@ export class Game {
     render();
   }
 
+  private applySettings(next: Settings): void {
+    this.settings = next;
+    this.audio.configure(next);
+    writeSettings(next);
+  }
+
+  private openSettings(back: () => void): void {
+    this.ui.showSettings(this.settings, {
+      change: (s) => this.applySettings({ ...s, tutorialSeen: this.settings.tutorialSeen }),
+      reset: () => {
+        this.save = { chaos: 0, skills: [], bestLevel: 0 };
+        this.owned.clear();
+        writeSave(this.save);
+        this.applySettings({ ...this.settings, tutorialSeen: false });
+        this.audio.lose();
+        this.paused = false;
+        this.showMenu();
+      },
+      tutorial: () => this.openTutorial(() => this.openSettings(back)),
+      close: back,
+    });
+  }
+
+  private openTutorial(done: () => void): void {
+    this.ui.showTutorial(() => {
+      this.applySettings({ ...this.settings, tutorialSeen: true });
+      done();
+    });
+  }
+
   private startRun(): void {
-    if (this.run) this.levels.forgetRun(this.run.seed);
-    this.run = { seed: (Math.random() * 2 ** 31) >>> 0, index: 0, chaosEarned: 0, cleared: 0 };
+    this.run = { index: 0, chaosEarned: 0, cleared: 0 };
     void this.loadLevel();
   }
 
@@ -195,14 +252,14 @@ export class Game {
     this.ui.showLoading(run.index === 0 ? 'Charting the coast…' : 'Charting the next coast…');
     let level: LevelData;
     try {
-      level = await this.levels.get(run.seed, run.index);
+      level = await this.levels.get(run.index);
     } catch (err) {
       this.ui.showError(String(err), () => this.showMenu());
       return;
     }
     if (this.run !== run) return;
     // Generate the next level while this one is played.
-    void this.levels.get(run.seed, run.index + 1).catch(() => undefined);
+    void this.levels.get(run.index + 1).catch(() => undefined);
     this.level = level;
     this.spawns = this.buildSpawns(level);
     this.shoreMouth = level.cities.map((c) => {
@@ -222,9 +279,12 @@ export class Game {
     this.selectedId = null;
     this.attempt = 1;
     this.selectedKind = this.firstAvailableKind();
+    this.pinned.clear();
+    this.lastHitAt = level.cities.map(() => 0);
     this.view.setLevel(level, this.spawns);
     this.audio.setCities(level.cities.length);
     this.enterPlacing();
+    if (level.hint) this.ui.setHint(level.hint);
     this.ui.banner(level.name, 'cool', `Sea ${level.index + 1} · ${level.cities.length} ${level.cities.length === 1 ? 'city' : 'cities'}`);
   }
 
@@ -273,11 +333,18 @@ export class Game {
   // ---------------------------------------------------------------- input
 
   private onPointerDown(e: PointerEvent): void {
-    if (this.phase !== 'placing') return;
     const p = this.view.pick(e.clientX, e.clientY);
     this.hover = p;
-    if (!p) return;
-    const grabbed = this.quakeAt(p.x, p.y);
+    if (!p || !this.level) return;
+    const grabbed = this.phase === 'placing' ? this.quakeAt(p.x, p.y) : null;
+    const city = this.cityAt(p.x, p.y);
+    if (!grabbed && city >= 0 && this.level.land[Math.round(p.y) * GRID_W + Math.round(p.x)]) {
+      // Tapping a city pins its card open (or closes it again).
+      if (this.pinned.has(city)) this.pinned.delete(city);
+      else this.pinned.add(city);
+      return;
+    }
+    if (this.phase !== 'placing') return;
     if (grabbed) {
       this.selectedId = grabbed.id;
       this.drag = { id: grabbed.id, pointerId: e.pointerId };
@@ -319,9 +386,9 @@ export class Game {
   }
 
   private onPointerMove(e: PointerEvent): void {
-    if (this.phase !== 'placing') return;
     const p = this.view.pick(e.clientX, e.clientY);
     this.hover = p;
+    if (this.phase !== 'placing') return;
     if (!this.drag || this.drag.pointerId !== e.pointerId || !p) return;
     const q = this.quakes.find((k) => k.id === this.drag!.id);
     if (!q) return;
@@ -340,6 +407,20 @@ export class Game {
     if (e.pointerType !== 'mouse') this.hover = null;
     if (q && this.level) q.dist = waterDistanceField(this.level.land, q.x, q.y);
     this.planChanged();
+  }
+
+  private cityAt(x: number, y: number): number {
+    if (!this.level) return -1;
+    let best = -1;
+    let bestD = CITY_HOVER;
+    this.level.cities.forEach((c, i) => {
+      const d = Math.hypot(c.x - x, c.y - y);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    return best;
   }
 
   private quakeAt(x: number, y: number): PlacedQuake | null {
@@ -419,6 +500,7 @@ export class Game {
     this.meters = this.level!.cities.map((c) => new CityMeter(c, this.lo.rules));
     this.zoneHit = this.level!.zones.map(() => false);
     this.allRuinedStep = -1;
+    this.lastHitStep = 0;
     this.accum = 0;
     this.phase = 'running';
     this.selectedId = null;
@@ -457,17 +539,34 @@ export class Game {
         }
       });
       if (this.allRuinedStep < 0 && this.meters.every((m) => m.ruined)) this.allRuinedStep = sim.stepIndex;
-      const calm = sim.sourcesDone && sim.stepIndex % 30 === 0 && sim.activity() < CALM;
       const done =
-        sim.stepIndex >= SIM_STEPS || calm || (this.allRuinedStep >= 0 && sim.stepIndex - this.allRuinedStep >= AFTERGLOW / DT);
+        sim.stepIndex >= SIM_STEPS || this.settled(sim) || (this.allRuinedStep >= 0 && sim.stepIndex - this.allRuinedStep >= AFTERGLOW / DT);
       if (done) {
+        if (this.allRuinedStep < 0 && sim.stepIndex < SIM_STEPS) this.ui.banner('The sea settles', 'cool');
         this.finish();
         return;
       }
     }
   }
 
+  /**
+   * True once nothing more can happen: every quake has fired and no wave left
+   * on the map is anywhere near tall enough to top a standing wall.
+   */
+  private settled(sim: WaveSim): boolean {
+    if (!sim.sourcesDone || this.allRuinedStep >= 0 || sim.stepIndex % 10 !== 0) return false;
+    if (sim.activity() < CALM) return true;
+    const walls = this.meters.filter((m) => !m.ruined).map((m) => m.wall);
+    if (walls.length === 0) return false;
+    const minWall = Math.min(...walls);
+    const tallest = sim.maxHeight();
+    if (tallest < (minWall * SETTLE_SHARE) / Math.max(2, this.quakes.length)) return true;
+    return sim.stepIndex - this.lastHitStep > QUIET_STEPS && tallest < minWall * QUIET_RATIO;
+  }
+
   private onCityHit(i: number, hit: Hit): void {
+    this.lastHitAt[i] = performance.now();
+    if (this.sim) this.lastHitStep = this.sim.stepIndex;
     const city = this.level!.cities[i];
     const pos = this.view.projectCity(i);
     this.view.cityHit(i, hit.damage);
@@ -579,7 +678,7 @@ export class Game {
   private frame(now: number): void {
     const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
-    if (this.phase === 'running' && this.sim) {
+    if (this.phase === 'running' && this.sim && !this.paused) {
       // Fixed timestep: the simulation advances in whole steps regardless of
       // frame rate, so the outcome never depends on the device.
       this.accum += (dt / DT) * this.speed;
@@ -631,9 +730,12 @@ export class Game {
 
   private updateLabels(): void {
     const level = this.level!;
+    const hovered = this.hover ? this.cityAt(this.hover.x, this.hover.y) : -1;
+    const now = performance.now();
     this.ui.setCityLabels(
       this.meters.map((m, i) => {
         const pos = this.view.projectCity(i);
+        const active = hovered === i || this.pinned.has(i) || now - (this.lastHitAt[i] ?? 0) < HIT_HIGHLIGHT_MS;
         return {
           x: pos.x,
           y: pos.y,
@@ -645,6 +747,7 @@ export class Game {
           ruined: m.ruined,
           water: this.sim && this.phase !== 'placing' ? Math.max(0, m.level) / m.wall : 0,
           prediction: this.phase === 'placing' && this.prediction ? this.prediction[i] : null,
+          active,
         };
       }),
     );

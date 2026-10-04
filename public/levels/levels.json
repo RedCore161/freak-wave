@@ -1,14 +1,127 @@
 [
   {
     "name": "First Ripple",
-    "image": "first-ripple.png"
+    "image": "01-first-ripple.png",
+    "quakes": [
+      "small",
+      "small"
+    ],
+    "hint": "The far epicenter needs a head start: give the near quake a delay so both crests arrive together."
+  },
+  {
+    "name": "The Long Shore",
+    "image": "02-long-shore.png",
+    "quakes": [
+      "small",
+      "medium"
+    ],
+    "hint": "Big distance differences need big delays. Drag the near quake far along the timeline."
   },
   {
     "name": "The Breakwater",
-    "image": "breakwater.png"
+    "image": "03-breakwater.png",
+    "quakes": [
+      "small",
+      "medium"
+    ],
+    "hint": "The wall blocks everything except the gap. Waves spread out again behind it."
   },
   {
-    "name": "Twin Isles",
-    "image": "twin-isles.png"
+    "name": "Harbor Echo",
+    "image": "04-harbor-echo.png",
+    "quakes": [
+      "small",
+      "medium",
+      "medium"
+    ],
+    "hint": "The harbor walls funnel and reflect waves toward the city at its far end."
+  },
+  {
+    "name": "Twin Towns",
+    "image": "05-twin-towns.png",
+    "quakes": [
+      "small",
+      "medium",
+      "small",
+      "medium"
+    ],
+    "hint": "Two cities, two plans. Some quakes can serve both if you time them well."
+  },
+  {
+    "name": "Scattered Isles",
+    "image": "06-scattered-isles.png",
+    "quakes": [
+      "small",
+      "medium",
+      "medium"
+    ],
+    "hint": "Small islands cast shadows and scatter waves. Look for clear lanes."
+  },
+  {
+    "name": "The Strait",
+    "image": "07-the-strait.png",
+    "quakes": [
+      "small",
+      "medium",
+      "medium",
+      "small"
+    ],
+    "hint": "A narrow channel guides waves between the two coasts."
+  },
+  {
+    "name": "Lighthouse",
+    "image": "08-lighthouse.png",
+    "quakes": [
+      "medium",
+      "medium",
+      "small"
+    ],
+    "hint": "Symmetric epicenters arrive together. The odd one out needs the delay."
+  },
+  {
+    "name": "Crescent Lagoon",
+    "image": "09-crescent-lagoon.png",
+    "quakes": [
+      "medium",
+      "medium",
+      "small"
+    ],
+    "hint": "The lagoon opens to the east. Waves from the west must find a way around."
+  },
+  {
+    "name": "The Fjord",
+    "image": "10-fjord.png",
+    "quakes": [
+      "medium",
+      "medium",
+      "small",
+      "small"
+    ],
+    "hint": "Only waves that enter the fjord mouth reach the city. Chain crests for combos."
+  },
+  {
+    "name": "Three Crowns",
+    "image": "11-three-crowns.png",
+    "quakes": [
+      "small",
+      "medium",
+      "medium",
+      "medium",
+      "small",
+      "small",
+      "medium"
+    ],
+    "hint": "Three cities, three timings. Plan one at a time, then check for overlap."
+  },
+  {
+    "name": "Maelstrom",
+    "image": "12-maelstrom.png",
+    "quakes": [
+      "medium",
+      "medium",
+      "medium",
+      "small"
+    ],
+    "hint": "The ring opens to the east. Everything that gets inside echoes around."
   }
 ]
